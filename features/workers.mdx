@@ -1,0 +1,356 @@
+---
+title: 'Worker System'
+description: 'Independent task execution processes in Spacebot'
+---
+
+Workers are independent processes that execute tasks. They get a specific job, a focused system prompt, and task-appropriate tools. No channel context, no soul, no personality—just execution.
+
+## Worker Types
+
+Spacebot supports two worker modes:
+
+<CardGroup cols={2}>
+  <Card title="Fire-and-Forget" icon="rocket">
+    Runs a task once and returns a result. Used for one-shot jobs: summarization, memory recall, shell commands.
+  </Card>
+  <Card title="Interactive" icon="message">
+    Long-running worker that accepts follow-up input from the channel. Used for coding sessions, debugging, complex multi-step tasks.
+  </Card>
+</CardGroup>
+
+## Creating Workers
+
+Channels create workers via the `spawn_worker` tool:
+
+```json
+{
+  "task": "Run the test suite and report any failures",
+  "mode": "fire_and_forget",
+  "timeout_seconds": 300
+}
+```
+
+<ParamField path="task" type="string" required>
+  The work to delegate. Be specific—this becomes the worker's initial prompt.
+</ParamField>
+
+<ParamField path="mode" type="string">
+  `fire_and_forget` (default) or `interactive`
+</ParamField>
+
+<ParamField path="timeout_seconds" type="integer">
+  Maximum execution time (1-3600 seconds). Fire-and-forget workers enforce this strictly. Interactive workers can exceed it with user approval.
+</ParamField>
+
+<ParamField path="suggested_skills" type="array">
+  Skill names to highlight in the worker's system prompt (e.g., `["github", "docker"]`)
+</ParamField>
+
+## Worker Lifecycle
+
+<Steps>
+  <Step title="Spawn">
+    Channel calls `spawn_worker`. A new worker process starts with a fresh history and task-specific tools.
+  </Step>
+  <Step title="Execute">
+    Worker runs in segments of 25 turns. After each segment, context usage is checked. If approaching 70% of the context window, older history is compacted.
+  </Step>
+  <Step title="Compaction">
+    Programmatic summarization removes oldest messages, replacing them with a recap of tool calls and results. No LLM involved—just truncation with a summary marker.
+  </Step>
+  <Step title="Complete">
+    Worker returns its result. Fire-and-forget workers terminate. Interactive workers transition to `WaitingForInput` state.
+  </Step>
+</Steps>
+
+```rust src/agent/worker.rs
+const TURNS_PER_SEGMENT: usize = 25;
+const MAX_SEGMENTS: usize = 10;
+const MAX_OVERFLOW_RETRIES: usize = 3;
+```
+
+## State Machine
+
+Workers follow a strict state transition model:
+
+<CodeGroup>
+```rust State Enum
+pub enum WorkerState {
+    Running,
+    WaitingForInput,  // Interactive only
+    Done,
+    Failed,
+}
+```
+
+```rust Valid Transitions
+matches!(
+    (current, target),
+    (Running, WaitingForInput)
+        | (Running, Done)
+        | (Running, Failed)
+        | (WaitingForInput, Running)
+        | (WaitingForInput, Failed)
+)
+```
+</CodeGroup>
+
+Invalid transitions return `InvalidStateTransition` errors.
+
+## Interactive Workers
+
+Interactive workers stay alive for follow-up:
+
+<Tabs>
+  <Tab title="Create">
+    ```json
+    {
+      "task": "Help me debug the authentication flow",
+      "mode": "interactive"
+    }
+    ```
+    Returns a worker ID immediately.
+  </Tab>
+  <Tab title="Follow-up">
+    ```json
+    {
+      "worker_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "message": "Check the token expiration logic in auth.rs"
+    }
+    ```
+    Use the `route` tool to send additional input.
+  </Tab>
+  <Tab title="Inspect">
+    ```json
+    {
+      "worker_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    }
+    ```
+    Use `worker_inspect` to see status and recent activity.
+  </Tab>
+</Tabs>
+
+Interactive workers appear in the channel's status block. When they return to `WaitingForInput`, the channel can send more input via `route`.
+
+## Context Management
+
+Workers run in segments with automatic compaction:
+
+<Steps>
+  <Step title="Segment Execution">
+    Worker runs for up to 25 turns (configurable via `default_max_turns`).
+  </Step>
+  <Step title="Context Check">
+    After each segment, estimate token usage. If over 70%, compact.
+  </Step>
+  <Step title="Compaction">
+    Remove 50% of oldest messages, insert a recap marker with tool call summaries.
+  </Step>
+  <Step title="Overflow Recovery">
+    If the provider rejects with context overflow, force-compact (remove 75%) and retry. Max 3 attempts.
+  </Step>
+</Steps>
+
+```rust src/agent/worker.rs
+async fn maybe_compact_history(
+    &self,
+    compacted_history: &mut Vec<Message>,
+    history: &mut Vec<Message>,
+) {
+    let context_window = **self.deps.runtime_config.context_window.load();
+    let estimated = estimate_history_tokens(history);
+    let usage = estimated as f32 / context_window as f32;
+
+    if usage < 0.70 {
+        return;
+    }
+
+    self.compact_history(compacted_history, history, 0.50, "worker history compacted")
+        .await;
+}
+```
+
+<Warning>
+  If a worker hits `MAX_SEGMENTS` (10) without completing, it returns a partial result. This prevents unbounded loops when the LLM keeps hitting `max_turns` without finishing.
+</Warning>
+
+## Worker Tools
+
+Workers get task-specific tools—no channel management, no memory tools:
+
+<CardGroup cols={3}>
+  <Card title="shell" icon="terminal">
+    Execute shell commands
+  </Card>
+  <Card title="file" icon="file">
+    Read/write/list files
+  </Card>
+  <Card title="exec" icon="play">
+    Run subprocesses
+  </Card>
+  <Card title="browser" icon="window">
+    Web automation
+  </Card>
+  <Card title="web_search" icon="magnifying-glass">
+    Brave Search API
+  </Card>
+  <Card title="set_status" icon="flag">
+    Update status message
+  </Card>
+  <Card title="task_update" icon="check">
+    Update assigned task
+  </Card>
+  <Card title="read_skill" icon="book">
+    Load skill content
+  </Card>
+  <Card title="MCP tools" icon="plug">
+    Dynamic tools from MCP servers
+  </Card>
+</CardGroup>
+
+See [Tools](/features/tools) for detailed documentation.
+
+## Sandboxing
+
+Workers run in a sandboxed environment:
+
+- **File operations** restricted to `workspace_dir`
+- **Shell commands** wrapped via `Sandbox::wrap()` (firejail, bubblewrap, or nsjail on Linux)
+- **Symlinks** blocked to prevent TOCTOU races
+- **Dangerous env vars** (`LD_PRELOAD`, `PYTHONPATH`, etc.) filtered out
+
+```rust src/sandbox.rs
+pub fn wrap(&self, program: &str, args: &[&str], working_dir: &Path) -> Command {
+    match self {
+        Sandbox::Firejail => {
+            let mut cmd = Command::new("firejail");
+            cmd.arg("--quiet")
+                .arg("--private")
+                .arg(format!("--whitelist={}", working_dir.display()))
+                .arg(program)
+                .args(args);
+            cmd
+        }
+        // ... other sandbox backends
+    }
+}
+```
+
+<Note>
+  Sandboxing is best-effort. On Windows and macOS, or when no sandbox backend is available, workers run with workspace path restrictions only.
+</Note>
+
+## Status Updates
+
+Workers report their status via the `set_status` tool:
+
+```json
+{"status": "installing dependencies"}
+```
+
+Status appears in:
+- Channel status blocks (if the worker was spawned by that channel)
+- Worker inspection output
+- Process event stream
+
+The channel injects a live status block on every turn so the LLM knows what workers are doing.
+
+## Failure Logging
+
+When a worker fails, it writes a structured log to `logs_dir`:
+
+```
+=== Worker Failure Log ===
+Worker ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+Channel ID: discord:123456789
+Timestamp: 2026-02-28T14:30:00Z
+State: Failed
+
+--- Task ---
+Run the test suite and report any failures
+
+--- Error ---
+Context overflow after 3 compaction attempts: ...
+
+--- History (47 messages) ---
+[0] User:
+  Run the test suite and report any failures
+[1] Assistant:
+  Tool Call: shell (id: call_abc123)
+    Args: {"command":"cargo test --all"}
+[2] User:
+  Tool Result (id: call_abc123):
+    Exit code: 0
+    ...
+```
+
+Log mode is configurable:
+
+<Tabs>
+  <Tab title="ErrorsOnly (default)">
+    Only failed workers write logs.
+  </Tab>
+  <Tab title="All">
+    All workers write logs (success and failure) to the same directory.
+  </Tab>
+  <Tab title="AllSeparate">
+    Successful workers log to `logs_dir/successful/`, failed workers to `logs_dir/failed/`.
+  </Tab>
+</Tabs>
+
+```toml agent.toml
+[settings]
+worker_log_mode = "all_separate"
+```
+
+## Worker Transcripts
+
+All worker executions persist a compressed transcript blob to the `worker_runs` table:
+
+```sql
+CREATE TABLE worker_runs (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT,
+    task TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    status TEXT NOT NULL,
+    transcript BLOB,  -- compressed JSON
+    tool_calls INTEGER DEFAULT 0
+);
+```
+
+Transcripts include:
+- Full message history (compacted + active)
+- Tool calls with arguments
+- Tool results
+- Status transitions
+
+Use the API to retrieve transcripts for debugging or audit trails.
+
+## Pluggable Workers
+
+Workers are pluggable. A worker can be:
+
+1. **Rig agent** with shell/file/exec tools (default)
+2. **OpenCode subprocess** (see [OpenCode Integration](/features/opencode))
+3. **Any external process** that accepts a task and reports status
+
+To add a custom worker type, implement the worker spawn logic in `spawn_worker.rs` and update the `WorkerMode` enum.
+
+## Performance Notes
+
+<AccordionGroup>
+  <Accordion title="Workers are CPU-bound">
+    Each worker is a separate tokio task. LLM calls dominate execution time. Workers run concurrently—spawn as many as your LLM provider rate limits allow.
+  </Accordion>
+  <Accordion title="Compaction is programmatic">
+    No LLM call for compaction. We truncate oldest messages and insert a recap. Fast and deterministic.
+  </Accordion>
+  <Accordion title="Tool output is truncated">
+    Outputs over 50KB are truncated with a notice. Keeps token usage bounded without losing information (the worker can re-read with offset/limit).
+  </Accordion>
+  <Accordion title="Fire-and-forget workers clean up">
+    When a fire-and-forget worker completes, its history is serialized to the `worker_runs` table and the in-memory state is dropped. No lingering processes.
+  </Accordion>
+</AccordionGroup>

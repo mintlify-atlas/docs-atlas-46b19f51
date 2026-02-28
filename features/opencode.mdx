@@ -1,0 +1,268 @@
+---
+title: 'OpenCode Integration'
+description: 'Delegate coding tasks to OpenCode subprocess workers'
+---
+
+Spacebot integrates with OpenCode for advanced coding workflows. When you need file editing, git operations, or multi-step code changes, spawn an OpenCode worker.
+
+## What is OpenCode?
+
+OpenCode is a specialized coding agent with:
+
+- **File editing tools** (read, edit, write, glob, grep)
+- **Git integration** (commit, push, branch, PR creation)
+- **Code understanding** (symbol search, imports, definitions)
+- **Multi-step workflows** (refactoring, migrations, test generation)
+
+Spacebot delegates coding work to OpenCode subprocesses.
+
+## Configuration
+
+Enable OpenCode in your `agent.toml`:
+
+```toml agent.toml
+[worker]
+opencode_enabled = true
+opencode_path = "/usr/local/bin/opencode"  # Optional: auto-detected if in PATH
+```
+
+<ParamField path="opencode_enabled" type="boolean">
+  Whether to use OpenCode for interactive coding workers (default: false)
+</ParamField>
+
+<ParamField path="opencode_path" type="string">
+  Path to the `opencode` binary. If not set, Spacebot checks `PATH`.
+</ParamField>
+
+<Warning>
+  OpenCode must be installed separately. See [OpenCode docs](https://opencode.ai/docs) for installation.
+</Warning>
+
+## Spawning OpenCode Workers
+
+When `opencode_enabled = true`, interactive workers with coding-related tasks are routed to OpenCode:
+
+```json
+{
+  "task": "Refactor the authentication module to use async/await",
+  "mode": "interactive"
+}
+```
+
+Spacebot detects coding intent from keywords:
+
+- `refactor`, `migrate`, `update`, `edit`, `fix`
+- `implement`, `add`, `create` (when referring to code)
+- `git`, `commit`, `branch`, `PR`, `pull request`
+- File paths or code snippets in the task
+
+If detected, the worker spawns as an OpenCode subprocess instead of a Rig agent.
+
+## OpenCode vs. Built-in Workers
+
+<Tabs>
+  <Tab title="Built-in Worker">
+    **Tools:**
+    - `shell`, `file`, `exec`
+    - `browser`, `web_search`
+    - `set_status`, `task_update`
+    
+    **Best for:**
+    - Running tests
+    - Executing scripts
+    - System administration
+    - Web scraping
+    - One-shot file operations
+  </Tab>
+  <Tab title="OpenCode Worker">
+    **Tools:**
+    - `read`, `edit`, `write`
+    - `bash`, `glob`, `grep`
+    - `git` (status, diff, commit, push)
+    - Code navigation
+    
+    **Best for:**
+    - Multi-file refactoring
+    - Code generation
+    - Git workflows
+    - Complex edits with search
+    - PR creation
+  </Tab>
+</Tabs>
+
+## Lifecycle
+
+<Steps>
+  <Step title="Spawn">
+    Channel calls `spawn_worker` with a coding task. Spacebot detects coding intent and spawns an OpenCode subprocess.
+  </Step>
+  <Step title="Initialize">
+    OpenCode receives the task and workspace directory. It loads project context (files, git state, recent changes).
+  </Step>
+  <Step title="Execute">
+    OpenCode works through the task using its coding tools. It can read, edit, run tests, commit, etc.
+  </Step>
+  <Step title="Interact">
+    The channel can send follow-up messages via the `route` tool. OpenCode responds with progress updates or questions.
+  </Step>
+  <Step title="Complete">
+    OpenCode returns a summary of changes. The subprocess terminates or waits for more input (interactive mode).
+  </Step>
+</Steps>
+
+OpenCode workers appear in the channel's status block like any other worker:
+
+```
+<active_workers>
+  Worker abc-123 (interactive, opencode):
+    Task: Refactor authentication module
+    Status: editing files
+    Progress: 3/5 files updated
+</active_workers>
+```
+
+## Communication Protocol
+
+Spacebot and OpenCode communicate via stdio (JSON-RPC-like messages):
+
+```json
+{"type": "task", "content": "Refactor auth module"}
+{"type": "message", "content": "What coding style should I use?"}
+{"type": "status", "content": "editing src/auth.rs"}
+{"type": "result", "content": "Refactoring complete. 5 files updated."}
+```
+
+<ParamField path="type" type="string">
+  Message type: `task`, `message`, `status`, `result`, `error`
+</ParamField>
+
+<ParamField path="content" type="string">
+  Message payload
+</ParamField>
+
+Spacebot translates these to ProcessEvents and channel responses.
+
+## Git Integration
+
+OpenCode has built-in git awareness:
+
+- **Auto-commit**: Can commit changes with descriptive messages
+- **Branch management**: Create, switch, merge branches
+- **PR creation**: Use `gh pr create` to open pull requests
+- **Diff review**: Show changes before committing
+
+<Note>
+  OpenCode respects `.gitignore` and won't commit secrets or build artifacts.
+</Note>
+
+Example workflow:
+
+<Steps>
+  <Step title="Make Changes">
+    OpenCode edits files based on the task.
+  </Step>
+  <Step title="Review Diff">
+    Shows `git diff` output to the channel.
+  </Step>
+  <Step title="Commit">
+    Commits with a generated message based on changes.
+  </Step>
+  <Step title="Create PR">
+    Opens a pull request with summary and context.
+  </Step>
+</Steps>
+
+## Error Handling
+
+If the OpenCode subprocess fails:
+
+1. **Crash**: Spacebot detects the subprocess exit and marks the worker as failed
+2. **Timeout**: After the worker timeout, Spacebot kills the subprocess
+3. **Parse error**: Invalid JSON from OpenCode logs an error and continues
+
+Failed OpenCode workers write logs to `logs_dir/failed/` like built-in workers.
+
+## When to Use OpenCode
+
+<CardGroup cols={2}>
+  <Card title="Use OpenCode" icon="check">
+    - Multi-file refactoring
+    - Code generation from specs
+    - Git workflows (branch, commit, PR)
+    - Complex search-and-replace
+    - Adding features across modules
+  </Card>
+  <Card title="Use Built-in Worker" icon="wrench">
+    - Running test suites
+    - Building/compiling
+    - System administration
+    - File copying/moving
+    - One-off script execution
+  </Card>
+</CardGroup>
+
+## Configuration Examples
+
+<AccordionGroup>
+  <Accordion title="Auto-detect OpenCode">
+    ```toml
+    [worker]
+    opencode_enabled = true
+    # Spacebot finds 'opencode' in PATH
+    ```
+  </Accordion>
+  <Accordion title="Explicit Path">
+    ```toml
+    [worker]
+    opencode_enabled = true
+    opencode_path = "/home/user/.local/bin/opencode"
+    ```
+  </Accordion>
+  <Accordion title="Disabled (default)">
+    ```toml
+    [worker]
+    opencode_enabled = false
+    # All workers use built-in tools
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Debugging
+
+OpenCode worker logs include:
+
+- Subprocess spawn command
+- Stdio communication (messages in/out)
+- Exit code and stderr on failure
+
+Enable debug logging:
+
+```bash
+RUST_LOG=spacebot::agent::worker=debug spacebot run
+```
+
+Logs show:
+
+```
+[DEBUG] spawning opencode worker: /usr/local/bin/opencode --workspace /workspace
+[DEBUG] -> {"type": "task", "content": "Refactor auth module"}
+[DEBUG] <- {"type": "status", "content": "reading files"}
+[DEBUG] <- {"type": "message", "content": "Found 3 files to update"}
+```
+
+## Limitations
+
+<Warning>
+  - **One OpenCode worker per task**: OpenCode processes are stateful. Don't spawn multiple workers for the same task.
+  - **No branching from OpenCode**: OpenCode workers can't create branches or spawn sub-workers.
+  - **Workspace-scoped**: OpenCode operates within `workspace_dir` only.
+</Warning>
+
+## Future Enhancements
+
+Planned features:
+
+- **Skill injection**: Pass Spacebot skills to OpenCode for specialized workflows
+- **Shared memory**: OpenCode can read Spacebot memories for project context
+- **Progress streaming**: Real-time file edit notifications
+- **IDE integration**: Connect OpenCode workers to VSCode/Cursor for live editing

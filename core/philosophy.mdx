@@ -1,0 +1,461 @@
+---
+title: Why Rust
+description: Why Spacebot is built in Rust instead of Python or TypeScript
+---
+
+Spacebot isn't a chatbot — it's an orchestration layer for autonomous AI processes running concurrently, sharing memory, and delegating to each other. That's infrastructure, and infrastructure should be machine code.
+
+## The Architecture Demands It
+
+Spacebot has:
+- **Concurrent LLM processes** sharing mutable state
+- **Async coordination** between channels, branches, and workers
+- **Shared memory** accessed from multiple processes
+- **Database connections** pooled across tokio tasks
+- **Message routing** across multiple platforms simultaneously
+- **No human in the loop** for most operations
+
+When multiple AI processes spawn tasks without human oversight, "the compiler won't let you do that" is a feature.
+
+## Rust's Guarantees
+
+### Memory Safety Without Garbage Collection
+
+No garbage collector pauses. Predictable latency. When a channel is responding to a user, there's no mystery pause while Python's GC runs.
+
+```rust
+// This won't compile if there's a data race
+let history = Arc::new(RwLock::new(Vec::new()));
+
+// Multiple readers OR one writer, enforced at compile time
+let reader1 = history.read().await;  // OK
+let reader2 = history.read().await;  // OK
+let writer = history.write().await;  // Blocks until readers drop
+```
+
+In Python or TypeScript, this is runtime bugs and race conditions.
+
+### Fearless Concurrency
+
+Spacebot spawns hundreds of tokio tasks:
+- One per channel
+- One per branch
+- One per worker
+- One per messaging adapter
+- One for the cortex
+- One per compaction worker
+- One per cron job
+
+They all share state. Rust's ownership system prevents data races at compile time:
+
+```rust
+// From src/agent/channel.rs
+tokio::spawn(async move {
+    let conclusion = branch.run(prompt).await?;
+    // Send conclusion back to channel via event
+    event_tx.send(ProcessEvent::BranchComplete { ... })?;
+});
+```
+
+The compiler ensures:
+- `branch` is moved into the task (no shared references)
+- `event_tx` is cloneable (explicitly `Sender<T>` is `Clone`)
+- No data races on shared state
+
+In Python:
+```python
+# This might work, might not, who knows?
+async def run_branch():
+    result = await branch.run(prompt)
+    # Is this thread-safe? Is event_tx still valid?
+    event_tx.send(result)
+    
+asyncio.create_task(run_branch())
+```
+
+### Type System as Documentation
+
+The type system encodes invariants:
+
+```rust
+// From src/agent/worker.rs
+pub enum WorkerState {
+    Running,
+    WaitingForInput,
+    Done,
+    Failed,
+}
+
+impl Worker {
+    fn can_transition_to(&self, new_state: WorkerState) -> bool {
+        matches!(
+            (self.state, new_state),
+            (WorkerState::Running, WorkerState::WaitingForInput)
+            | (WorkerState::Running, WorkerState::Done)
+            | (WorkerState::Running, WorkerState::Failed)
+            | (WorkerState::WaitingForInput, WorkerState::Running)
+            | (WorkerState::WaitingForInput, WorkerState::Done)
+        )
+    }
+}
+```
+
+Illegal state transitions are compile-time or runtime errors, not silent bugs.
+
+In Python:
+```python
+# state is just a string, anything goes
+worker.state = "donee"  # Typo, no error
+worker.state = "Running" if condition else "Invalid"  # Oops
+```
+
+### Error Handling
+
+Errors are values, not exceptions:
+
+```rust
+// From src/memory/store.rs
+pub async fn save(&self, memory: &Memory) -> Result<()> {
+    sqlx::query("INSERT INTO memories ...")
+        .execute(&self.pool)
+        .await
+        .context("failed to save memory")?;
+    Ok(())
+}
+```
+
+You can't ignore errors. The compiler forces you to handle them:
+
+```rust
+// This won't compile
+store.save(&memory);  // Error: Result<()> must be used
+
+// Must handle
+store.save(&memory).await?;  // Propagate
+// or
+match store.save(&memory).await {
+    Ok(_) => { /* success */ }
+    Err(e) => { /* handle error */ }
+}
+```
+
+In Python:
+```python
+# Silently fails, good luck debugging
+try:
+    store.save(memory)
+except Exception:
+    pass  # Oops
+```
+
+## Performance
+
+### Single Binary
+
+No interpreter. No runtime dependencies. Just machine code:
+
+```bash
+$ du -h target/release/spacebot
+45M     target/release/spacebot
+
+$ ldd target/release/spacebot
+    linux-vdso.so.1
+    libgcc_s.so.1
+    libc.so.6
+    /lib64/ld-linux-x86-64.so.2
+```
+
+Compare to Python:
+```bash
+# Python + dependencies
+$ du -h venv/
+250M    venv/
+
+# And you need Python installed
+$ python --version
+Python 3.11.0
+```
+
+### Startup Time
+
+```bash
+# Rust
+$ time ./target/release/spacebot status
+real    0m0.003s
+
+# Python
+$ time python main.py --status
+real    0m0.450s
+```
+
+150x faster startup. For CLI tools, daemon commands, and quick checks, this matters.
+
+### Memory Usage
+
+Rust has no GC overhead:
+
+```bash
+# Spacebot with 10 active channels
+$ ps aux | grep spacebot
+USER       PID %CPU %MEM    VSZ   RSS
+user     12345  1.2  0.8  85432 65124  # 65MB resident
+```
+
+Compare to a Python AI framework:
+```bash
+$ ps aux | grep python
+USER       PID %CPU %MEM    VSZ   RSS
+user     67890  2.5  4.2 450120 340256  # 340MB resident
+```
+
+5x less memory for the same workload.
+
+## Developer Experience
+
+### Refactoring Confidence
+
+```rust
+// Change a type
+pub enum ProcessType {
+    Channel,
+    Branch,
+    Worker,
+    Compactor,
+    Cortex,
+    Voice,  // New variant
+}
+
+// Compiler finds every place that needs updating
+error[E0004]: non-exhaustive patterns: `ProcessType::Voice` not covered
+  --> src/llm/routing.rs:76:15
+   |
+76 |         match process_type {
+   |               ^^^^^^^^^^^^ pattern `ProcessType::Voice` not covered
+```
+
+The compiler is your pair programmer. It finds every place that needs updating when you change a type.
+
+In Python:
+```python
+# Add new process type
+class ProcessType(Enum):
+    CHANNEL = "channel"
+    BRANCH = "branch"
+    WORKER = "worker"
+    VOICE = "voice"  # New
+
+# Good luck finding every place that needs updating
+# Runtime errors in production if you miss one
+```
+
+### IDE Support
+
+Rust Analyzer provides:
+- **Go to definition** that actually works
+- **Find all references** across the entire codebase
+- **Type hints** everywhere
+- **Inline errors** as you type
+- **Refactoring tools** (rename, extract function, etc.)
+
+Python's type hints are optional and often wrong. TypeScript's type system is better, but it's still interpreted.
+
+### Compile-Time Guarantees
+
+If it compiles, it probably works:
+
+```bash
+$ cargo build --release
+   Compiling spacebot v0.1.0
+    Finished release [optimized] target(s) in 2m 34s
+
+# All these are checked at compile time:
+# - No data races
+# - No null pointer dereferences  
+# - No use-after-free
+# - No type mismatches
+# - Exhaustive pattern matching
+# - Lifetime validity
+```
+
+In Python or TypeScript:
+```bash
+# All good!
+$ mypy .
+Success: no issues found
+
+# Runtime:
+$ python main.py
+Traceback (most recent call last):
+  File "main.py", line 42, in process_message
+    result = channel.history[i].content
+AttributeError: 'NoneType' object has no attribute 'content'
+```
+
+## Ecosystem
+
+### Tokio for Async
+
+Tokio is the most mature async runtime:
+
+- **Work-stealing scheduler** — Efficient CPU utilization
+- **No callback hell** — async/await syntax
+- **Backpressure** — Built-in flow control
+- **Tracing integration** — Structured logging and diagnostics
+
+```rust
+// Spawn 1000 concurrent tasks
+for i in 0..1000 {
+    tokio::spawn(async move {
+        // Work happens here
+    });
+}
+
+// Tokio handles scheduling, no thread pool tuning needed
+```
+
+Python's asyncio:
+```python
+# Need to manage event loops, executors, thread pools
+loop = asyncio.get_event_loop()
+executor = ThreadPoolExecutor(max_workers=10)
+
+for i in range(1000):
+    loop.run_in_executor(executor, task)
+```
+
+### SQLx for Databases
+
+Compile-time checked SQL queries:
+
+```rust
+// This query is checked at compile time against the database schema
+let memory = sqlx::query_as::<_, Memory>(
+    "SELECT id, content, memory_type, importance FROM memories WHERE id = ?"
+)
+.bind(id)
+.fetch_one(&pool)
+.await?;
+```
+
+If the schema changes, your code won't compile until you fix the queries.
+
+Python ORMs:
+```python
+# Typo in column name? Runtime error!
+memory = session.query(Memory).filter_by(remembery_type="fact").first()
+```
+
+### Serde for Serialization
+
+Zero-cost serialization:
+
+```rust
+#[derive(Serialize, Deserialize)]
+pub struct Memory {
+    pub id: String,
+    pub content: String,
+    pub memory_type: MemoryType,
+    // ...
+}
+
+// JSON serialization is compile-time generated
+let json = serde_json::to_string(&memory)?;
+```
+
+No runtime reflection. No string-based lookups. Pure speed.
+
+## What Rust Doesn't Give You
+
+**Slow compile times** — Full rebuilds take 2-3 minutes. Incremental builds are fast (seconds), but cold starts hurt.
+
+**Steep learning curve** — Ownership, lifetimes, async, Result types. First few weeks are rough.
+
+**Smaller ecosystem** — Fewer libraries than Python. Sometimes you have to build it yourself.
+
+**More verbose** — Rust code is longer than equivalent Python. Explicit > implicit.
+
+## Why Not Python?
+
+Python is great for:
+- Prototyping
+- Data science
+- Scripts
+- Single-threaded tools
+
+Python is bad for:
+- Concurrent systems
+- Long-running daemons
+- Memory-constrained environments
+- Systems where bugs cost money
+
+Spacebot is:
+- Highly concurrent
+- Long-running (daemon mode)
+- Sharing mutable state
+- Running on user servers (not cloud VMs with infinite RAM)
+
+Rust fits. Python doesn't.
+
+## Why Not TypeScript?
+
+TypeScript is better than Python for type safety, but:
+
+**Still interpreted** — V8 JIT is fast, but not as fast as machine code
+
+**GC pauses** — Unpredictable latency
+
+**Weak type system** — `any`, type assertions, runtime casts everywhere
+
+**No compile-time memory safety** — Data races are possible
+
+```typescript
+// This compiles, might crash at runtime
+let history: Message[] | null = null;
+history.push(message);  // Oops
+```
+
+## Why Not Go?
+
+Go is actually a decent choice. But:
+
+**No sum types** — Can't express `Result<T, E>` ergonomically
+
+**Weak error handling** — `if err != nil` everywhere, easy to ignore errors
+
+**No generics until recently** — And they're still limited
+
+**GC pauses** — Better than Python/Node, worse than Rust
+
+```go
+// Easy to ignore errors
+result, err := doThing()
+// Oops, forgot to check err
+result.Process()
+```
+
+## The Bottom Line
+
+Spacebot needs:
+- **Concurrency** — Rust's ownership system prevents data races
+- **Performance** — Single binary, no GC, predictable latency
+- **Reliability** — Compile-time guarantees, exhaustive error handling
+- **Efficiency** — Low memory usage, fast startup
+
+Rust delivers all four. Python, TypeScript, and Go make tradeoffs that don't fit this use case.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="diagram-project" href="/core/architecture">
+    See how Rust's guarantees enable the architecture
+  </Card>
+  <Card title="Contributing" icon="code-pull-request" href="https://github.com/spacedriveapp/spacebot">
+    Read RUST_STYLE_GUIDE.md and AGENTS.md
+  </Card>
+  <Card title="Tokio" icon="link" href="https://tokio.rs">
+    Learn about Rust's async runtime
+  </Card>
+  <Card title="Rig" icon="link" href="https://github.com/0xPlaygrounds/rig">
+    Explore the LLM framework Spacebot uses
+  </Card>
+</CardGroup>

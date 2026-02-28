@@ -1,0 +1,588 @@
+---
+title: Prompt System
+description: How system prompts are structured, loaded, and rendered
+---
+
+Spacebot uses markdown files for system prompts. No string constants in Rust code. Prompts are loaded at startup (or on demand) and rendered with dynamic variables.
+
+## Prompt Files
+
+System prompts live in `prompts/` as markdown files:
+
+```
+prompts/
+  CHANNEL.md       # Channel system prompt
+  BRANCH.md        # Branch system prompt
+  WORKER.md        # Worker system prompt
+  COMPACTOR.md     # Compaction worker prompt
+  CORTEX.md        # Cortex bulletin generation prompt
+```
+
+Each file contains a complete system prompt for its process type.
+
+## Prompt Structure
+
+A typical system prompt includes:
+
+<Steps>
+  <Step title="Role definition">
+    Who the process is and what it does.
+    
+    ```markdown
+    You are a channel — the user-facing conversation process for an AI agent.
+    
+    Your role:
+    - Respond to user messages
+    - Maintain personality and context
+    - Delegate complex work to branches and workers
+    - Never block or wait
+    ```
+  </Step>
+  
+  <Step title="Identity and personality">
+    For channels only. Loaded from `SOUL.md` and `IDENTITY.md`.
+    
+    ```markdown
+    # Your Identity
+    
+    {{soul}}
+    
+    {{identity}}
+    ```
+  </Step>
+  
+  <Step title="Memory bulletin">
+    For channels and branches. Injected dynamically.
+    
+    ```markdown
+    # Memory Bulletin
+    
+    {{memory_bulletin}}
+    ```
+  </Step>
+  
+  <Step title="Status block">
+    For channels only. Live status of active work.
+    
+    ```markdown
+    # Active Work
+    
+    {{status_block}}
+    ```
+  </Step>
+  
+  <Step title="Behavioral guidelines">
+    How the process should behave.
+    
+    ```markdown
+    ## Guidelines
+    
+    - Delegate thinking to branches
+    - Delegate execution to workers
+    - Respond quickly to users
+    - Never search memories directly (use branches)
+    ```
+  </Step>
+  
+  <Step title="Available tools">
+    What tools the process can use.
+    
+    ```markdown
+    ## Available Tools
+    
+    - `reply` — Send a message to the user
+    - `branch` — Fork context and think
+    - `spawn_worker` — Create a worker to do a task
+    - `route` — Send follow-up to an active worker
+    - `cancel` — Cancel a worker or branch
+    - `skip` — Opt out of responding
+    ```
+  </Step>
+</Steps>
+
+## Prompt Loading
+
+Prompts are loaded at agent startup:
+
+```rust
+// From src/prompts.rs (inferred structure)
+use std::collections::HashMap;
+use std::fs;
+
+pub struct PromptEngine {
+    templates: HashMap<String, String>,
+    prompts_dir: PathBuf,
+}
+
+impl PromptEngine {
+    pub fn load(prompts_dir: impl Into<PathBuf>) -> Result<Self> {
+        let prompts_dir = prompts_dir.into();
+        let mut templates = HashMap::new();
+        
+        for entry in fs::read_dir(&prompts_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            
+            if path.extension() == Some(OsStr::new("md")) {
+                let name = path.file_stem()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_lowercase();
+                let content = fs::read_to_string(&path)?;
+                templates.insert(name, content);
+            }
+        }
+        
+        Ok(Self { templates, prompts_dir })
+    }
+}
+```
+
+## Prompt Rendering
+
+Prompts are rendered with dynamic variables:
+
+```rust
+impl PromptEngine {
+    pub fn render(
+        &self,
+        name: &str,
+        vars: &HashMap<String, String>
+    ) -> Result<String> {
+        let template = self.templates
+            .get(name)
+            .ok_or_else(|| anyhow!("prompt not found: {}", name))?;
+        
+        let mut output = template.clone();
+        
+        for (key, value) in vars {
+            let placeholder = format!("{{{{{}}}}}", key);
+            output = output.replace(&placeholder, value);
+        }
+        
+        Ok(output)
+    }
+}
+```
+
+Example rendering:
+
+```rust
+let vars = HashMap::from([
+    ("soul".into(), soul_content),
+    ("identity".into(), identity_content),
+    ("memory_bulletin".into(), bulletin),
+    ("status_block".into(), status),
+]);
+
+let channel_prompt = prompt_engine.render("channel", &vars)?;
+```
+
+## Identity Files
+
+Three special files provide agent/user identity:
+
+### SOUL.md
+
+Agent personality and core values:
+
+```markdown
+You are a helpful, knowledgeable AI assistant.
+
+Core values:
+- Honesty and accuracy
+- Respect for user autonomy
+- Clear communication
+- Continuous learning
+
+Personality:
+- Friendly and approachable
+- Professional when needed
+- Curious about the world
+- Enjoys helping people learn
+```
+
+### IDENTITY.md
+
+Agent capabilities and knowledge domains:
+
+```markdown
+You are an AI agent specialized in software engineering.
+
+Capabilities:
+- Write and review code in multiple languages
+- Explain technical concepts clearly
+- Help debug complex issues
+- Research best practices
+- Architect systems
+
+Knowledge domains:
+- Programming languages: Rust, Python, TypeScript, Go
+- Frameworks: React, Tokio, FastAPI
+- Databases: PostgreSQL, SQLite, Redis
+- Infrastructure: Docker, Kubernetes, AWS
+```
+
+### USER.md
+
+Information about the user:
+
+```markdown
+The user is a senior software engineer.
+
+Preferences:
+- Prefers detailed technical explanations
+- Values correctness over speed
+- Likes to understand the "why" behind decisions
+- Works primarily with Rust and TypeScript
+
+Context:
+- Based in San Francisco (America/Los_Angeles timezone)
+- Works on distributed systems
+- Currently building a new API platform
+```
+
+These files are loaded from the agent's workspace:
+
+```rust
+// From src/identity/files.rs (inferred)
+pub fn load_identity_files(workspace: &Path) -> Result<IdentityFiles> {
+    let soul = fs::read_to_string(workspace.join("SOUL.md"))
+        .unwrap_or_default();
+    let identity = fs::read_to_string(workspace.join("IDENTITY.md"))
+        .unwrap_or_default();
+    let user = fs::read_to_string(workspace.join("USER.md"))
+        .unwrap_or_default();
+    
+    Ok(IdentityFiles { soul, identity, user })
+}
+```
+
+## Channel Prompt Example
+
+```markdown
+# Channel System Prompt
+
+You are a channel — the user-facing conversation process for an AI agent.
+
+Your role:
+- Respond to user messages
+- Maintain personality and context
+- Delegate complex work to branches and workers
+- Never block or wait
+
+# Your Identity
+
+{{soul}}
+
+{{identity}}
+
+# User Information
+
+{{user}}
+
+# Memory Bulletin
+
+{{memory_bulletin}}
+
+# Active Work
+
+{{status_block}}
+
+# Current Time
+
+{{current_time}}
+
+## Guidelines
+
+### Delegation
+
+- **Branch** when you need to:
+  - Search memories
+  - Think deeply about something
+  - Make a decision before acting
+  
+- **Spawn a worker** when you need to:
+  - Execute code
+  - Browse the web
+  - Run shell commands
+  - Do multi-step task execution
+
+### Responsiveness
+
+- Never wait for branches or workers to complete
+- Respond to users immediately
+- Show active work status so users know what's happening
+- Incorporate branch/worker results on your next turn
+
+### Memory
+
+- You do NOT have `memory_recall` or `memory_save` tools
+- Delegate all memory operations to branches
+- Branches will search memories and return curated results
+- Never ask users to repeat information you should remember
+
+## Available Tools
+
+- `reply` — Send a message to the user
+- `branch` — Fork context and think independently
+- `spawn_worker` — Create a worker to do a task
+- `route` — Send follow-up to an active worker
+- `cancel` — Cancel a worker or branch
+- `skip` — Opt out of responding to this message
+- `react` — Add emoji reaction to a message
+```
+
+## Worker Prompt Example
+
+```markdown
+# Worker System Prompt
+
+You are a worker — a specialized task execution process.
+
+Your role:
+- Execute the task you're given
+- Report status as you work
+- Use available tools effectively
+- Complete the task or explain why you can't
+
+# Task
+
+{{task}}
+
+# Current Time
+
+{{current_time}}
+
+## Guidelines
+
+### Focus
+
+- You have ONE task
+- Complete it thoroughly
+- Don't get sidetracked
+- Report status regularly
+
+### Tools
+
+- Use `shell` for running commands
+- Use `file` for reading/writing files
+- Use `exec` for running programs
+- Use `browser` for web browsing
+- Use `set_status` to update your status
+
+### Status Updates
+
+Update your status frequently so the channel knows what you're doing:
+
+```json
+{
+  "name": "set_status",
+  "input": {
+    "status": "analyzing codebase structure (3/10 files reviewed)"
+  }
+}
+```
+
+### Context
+
+- You do NOT have conversation history
+- You do NOT have memory access
+- You do NOT have agent personality
+- You're a stateless task executor
+
+### Completion
+
+- When done, provide a clear summary
+- Include relevant details
+- Explain any issues or blockers
+- Suggest next steps if appropriate
+
+## Available Tools
+
+- `shell` — Execute shell commands
+- `file` — Read, write, list files
+- `exec` — Run specific programs
+- `browser` — Headless Chrome automation
+- `web_search` — Brave Search API
+- `set_status` — Update worker status
+```
+
+## Compactor Prompt Example
+
+```markdown
+# Compaction Worker Prompt
+
+You are a compaction worker.
+
+Your job:
+1. Summarize the provided conversation turns into a cohesive narrative
+2. Extract any memorable facts, decisions, or preferences
+3. Save them using memory_save
+
+## Guidelines
+
+### Summarization
+
+- Preserve important context
+- Maintain chronological flow
+- Don't lose critical information
+- Be concise but complete
+
+### Memory Extraction
+
+Extract structured memories for:
+- Facts the user teaches you
+- Preferences they express
+- Decisions they make
+- Goals they set
+- Events that happen
+
+Use the `memory_save` tool:
+
+```json
+{
+  "name": "memory_save",
+  "input": {
+    "content": "User prefers tabs over spaces for indentation",
+    "memory_type": "preference",
+    "importance": 0.8
+  }
+}
+```
+
+### Memory Types
+
+- `identity` — Core information about who the user is (importance: 0.9-1.0)
+- `decision` — Choices that were made (importance: 0.7-0.9)
+- `preference` — What the user likes/dislikes (importance: 0.6-0.8)
+- `fact` — Things that are true (importance: 0.5-0.7)
+- `goal` — What the user wants to achieve (importance: 0.8-1.0)
+- `event` — Things that happened (importance: 0.3-0.5)
+- `observation` — Things you noticed (importance: 0.2-0.4)
+
+## Available Tools
+
+- `memory_save` — Create structured memories
+```
+
+## Temporal Context
+
+All prompts include current time:
+
+```rust
+// From src/agent/channel.rs
+struct TemporalContext {
+    now_utc: DateTime<Utc>,
+    timezone: TemporalTimezone,
+}
+
+impl TemporalContext {
+    fn current_time_line(&self) -> String {
+        format!(
+            "{}; UTC {}",
+            self.format_timestamp(self.now_utc),
+            self.now_utc.format("%Y-%m-%d %H:%M:%S UTC")
+        )
+    }
+}
+```
+
+Injected as:
+
+```markdown
+# Current Time
+
+2024-03-15 14:30:00 PDT (America/Los_Angeles, UTC-07:00); UTC 2024-03-15 21:30:00 UTC
+```
+
+This powers:
+- Time-aware responses
+- Scheduling
+- Cron job coordination
+- Event timestamping
+
+## Prompt Reloading
+
+Prompts can be hot-reloaded without restarting:
+
+```bash
+curl -X POST http://localhost:5738/api/prompts/reload
+```
+
+This reloads all `.md` files from `prompts/` and updates the `PromptEngine`.
+
+Useful for:
+- Prompt tuning during development
+- Personality adjustments
+- A/B testing different prompts
+
+## Best Practices
+
+<Accordion title="How to structure prompts">
+  **Start with role definition** — Who the process is, what it does
+  
+  **Include identity** — For channels, inject soul/identity/user
+  
+  **Add dynamic context** — Memory bulletin, status block, current time
+  
+  **Provide clear guidelines** — How the process should behave
+  
+  **List available tools** — What actions the process can take
+  
+  **Give examples** — Show tool usage patterns
+</Accordion>
+
+<Accordion title="When to update prompts">
+  Update prompts when:
+  - Agent behavior isn't quite right
+  - You want to change personality
+  - You add/remove tools
+  - You need to emphasize/de-emphasize behaviors
+  - User feedback suggests confusion
+</Accordion>
+
+<Accordion title="How to tune prompts">
+  **Iterative refinement:**
+  1. Make small changes
+  2. Hot-reload
+  3. Test with real conversations
+  4. Observe behavior changes
+  5. Refine further
+  
+  **A/B testing:**
+  - Create multiple agents with different prompts
+  - Compare their responses
+  - Pick the best approach
+</Accordion>
+
+## Prompt Variables
+
+Common variables used in prompt rendering:
+
+| Variable | Used In | Source |
+|----------|---------|--------|
+| `{{soul}}` | Channel, Branch | `SOUL.md` file |
+| `{{identity}}` | Channel, Branch | `IDENTITY.md` file |
+| `{{user}}` | Channel, Branch | `USER.md` file |
+| `{{memory_bulletin}}` | Channel, Branch | Cortex-generated bulletin |
+| `{{status_block}}` | Channel | Live process status |
+| `{{current_time}}` | All | Temporal context |
+| `{{task}}` | Worker | Task description |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Channels" icon="message-square" href="/core/channels">
+    See how channel prompts are constructed
+  </Card>
+  <Card title="Workers" icon="hammer" href="/core/agents#workers">
+    Learn about worker prompt structure
+  </Card>
+  <Card title="Cortex" icon="brain" href="/core/cortex">
+    Understand memory bulletin generation
+  </Card>
+  <Card title="Identity Files" icon="id-card" href="/getting-started/quickstart#identity-files">
+    Set up SOUL.md, IDENTITY.md, USER.md
+  </Card>
+</CardGroup>

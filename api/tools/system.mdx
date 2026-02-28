@@ -1,0 +1,296 @@
+---
+title: System Tools
+description: System-level tools for scheduling, task management, and cross-agent communication
+---
+
+System tools provide high-level orchestration capabilities including scheduled tasks, task management, and inter-agent messaging.
+
+## cron
+
+Manage scheduled recurring tasks (cron jobs). Create jobs that run at specified intervals or on strict wall-clock schedules.
+
+<ParamField path="action" type="string" required>
+  The operation to perform:
+  - `"create"`: Create a new cron job
+  - `"list"`: List all active cron jobs
+  - `"delete"`: Remove a cron job
+</ParamField>
+
+### Create Parameters
+
+<ParamField path="id" type="string">
+  For create: A short unique ID (e.g., "check-email", "daily-summary"). Must be 1-50 characters, alphanumeric with hyphens and underscores only.
+</ParamField>
+
+<ParamField path="prompt" type="string">
+  For create: The instruction to execute on each run. Maximum 10,000 characters. This is the task description given to a fresh channel process.
+</ParamField>
+
+<ParamField path="cron_expr" type="string">
+  For create: Strict wall-clock cron expression using 5-field syntax (minute hour day month weekday).
+  
+  Examples:
+  - `"0 9 * * *"` - Daily at 09:00
+  - `"0 */2 * * *"` - Every 2 hours
+  - `"30 14 * * 1-5"` - Weekdays at 14:30
+  - `"0 0 1 * *"` - First day of each month at midnight
+  
+  When provided, this takes precedence over `interval_secs`.
+</ParamField>
+
+<ParamField path="interval_secs" type="integer">
+  For create: Seconds between runs. Minimum 60 seconds. Examples:
+  - `3600` - Every hour
+  - `86400` - Every day
+  - `604800` - Every week
+  
+  Ignored if `cron_expr` is provided.
+</ParamField>
+
+<ParamField path="delivery_target" type="string">
+  For create: Where to send results, in "adapter:target" format.
+  
+  Examples:
+  - `"discord:dm:123456789"` - Discord direct message
+  - `"discord:987654321"` - Discord channel
+  - `"telegram:user:123456"` - Telegram user
+  - `"slack:C12345678"` - Slack channel
+  
+  Defaults to the current conversation if omitted (when available).
+</ParamField>
+
+<ParamField path="active_start_hour" type="integer">
+  For create: Hour (0-23) when the job becomes active. Use with `active_end_hour` to create an active time window.
+</ParamField>
+
+<ParamField path="active_end_hour" type="integer">
+  For create: Hour (0-23) when the job becomes inactive. Jobs only run within the active window.
+</ParamField>
+
+<ParamField path="timeout_secs" type="integer" default={120}>
+  For create: Maximum seconds to wait for the job to complete before timing out.
+  
+  Recommendations:
+  - Quick checks: 60-120 seconds
+  - Research tasks: 300-600 seconds
+  - Heavy processing: 600+ seconds
+</ParamField>
+
+<ParamField path="run_once" type="boolean" default={false}>
+  For create: If true, run this job once and auto-disable after the first execution attempt. Useful for scheduled one-time reminders.
+</ParamField>
+
+### Delete Parameters
+
+<ParamField path="delete_id" type="string">
+  For delete: The ID of the cron job to remove. Alternative to using `id`.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Whether the operation succeeded
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message describing the result
+</ResponseField>
+
+<ResponseField name="jobs" type="array">
+  For list action: Array of cron job entries. Each entry includes:
+  - `id` (string): Job identifier
+  - `prompt` (string): The task instruction
+  - `cron_expr` (string, optional): Cron schedule expression
+  - `interval_secs` (integer): Interval in seconds
+  - `delivery_target` (string): Where results are sent
+  - `run_once` (boolean): Whether this is a one-time job
+  - `active_hours` (string, optional): Active time window in "HH:MM-HH:MM" format
+</ResponseField>
+
+### Example: Daily summary at 6 PM
+
+```json
+{
+  "action": "create",
+  "id": "daily-summary",
+  "prompt": "Review today's conversations and activity. Create a brief summary highlighting key decisions, open questions, and action items. Keep it under 200 words.",
+  "cron_expr": "0 18 * * *",
+  "delivery_target": "discord:dm:123456789",
+  "timeout_secs": 180
+}
+```
+
+### Example: Hourly check during work hours
+
+```json
+{
+  "action": "create",
+  "id": "work-hour-check",
+  "prompt": "Check for any urgent tasks or messages that need attention. Reply only if there's something actionable.",
+  "interval_secs": 3600,
+  "delivery_target": "slack:C12345678",
+  "active_start_hour": 9,
+  "active_end_hour": 17,
+  "timeout_secs": 60
+}
+```
+
+### Example: One-time reminder
+
+```json
+{
+  "action": "create",
+  "id": "meeting-reminder",
+  "prompt": "Reminder: Team standup in 15 minutes. Join the #general channel.",
+  "cron_expr": "45 9 15 3 *",
+  "delivery_target": "discord:dm:123456789",
+  "run_once": true,
+  "timeout_secs": 30
+}
+```
+
+### Example: List all jobs
+
+```json
+{
+  "action": "list"
+}
+```
+
+### Example: Delete a job
+
+```json
+{
+  "action": "delete",
+  "delete_id": "daily-summary"
+}
+```
+
+<Info>
+**Circuit breaker**: Cron jobs that fail 3 consecutive times are automatically disabled to prevent resource exhaustion.
+</Info>
+
+<Note>
+**Timezone handling**: Active hours and cron expressions use the timezone configured in the scheduler (typically system local time or UTC). The `list` action shows which timezone is in use.
+</Note>
+
+---
+
+## tasks
+
+List and filter tasks from the task store. Available to branches for task awareness and planning.
+
+<ParamField path="status" type="string">
+  Optional status filter. Valid values:
+  - `pending`: Not yet started
+  - `in_progress`: Currently being worked on
+  - `completed`: Finished successfully
+  - `failed`: Encountered an error
+  - `cancelled`: Manually cancelled
+</ParamField>
+
+<ParamField path="priority" type="string">
+  Optional priority filter. Valid values:
+  - `low`: Low priority
+  - `normal`: Normal priority
+  - `high`: High priority
+  - `urgent`: Urgent, needs immediate attention
+</ParamField>
+
+<ParamField path="limit" type="integer" default={20}>
+  Maximum number of tasks to return (1-500)
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the query succeeded
+</ResponseField>
+
+<ResponseField name="count" type="integer">
+  Number of tasks returned
+</ResponseField>
+
+<ResponseField name="tasks" type="array">
+  Array of task objects. Each task includes:
+  - `id` (string): Task UUID
+  - `title` (string): Task title
+  - `description` (string): Detailed description
+  - `status` (string): Current status
+  - `priority` (string): Task priority
+  - `created_at` (string): ISO 8601 timestamp
+  - `updated_at` (string): ISO 8601 timestamp
+  - `assigned_to` (string, optional): Agent or worker assigned
+  - `metadata` (object, optional): Additional task-specific data
+</ResponseField>
+
+### Example: List pending high-priority tasks
+
+```json
+{
+  "status": "pending",
+  "priority": "high",
+  "limit": 10
+}
+```
+
+### Example: List all recent tasks
+
+```json
+{
+  "limit": 50
+}
+```
+
+<Note>
+The `tasks` tool is read-only. Task creation and updates happen through other mechanisms (workers, cron jobs, external APIs).
+</Note>
+
+---
+
+## send_agent_message
+
+Send a message to another agent through the communication graph. Validates that a link exists and the direction permits messaging.
+
+<Warning>
+**Current status**: This tool is a stub. It validates the link and ends the turn, but cross-agent task delegation is not yet implemented. Messages are validated but not delivered.
+</Warning>
+
+<ParamField path="target" type="string" required>
+  Target agent's ID or display name. The tool resolves names case-insensitively.
+</ParamField>
+
+<ParamField path="message" type="string" required>
+  The message content to send to the target agent
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the message was validated (not yet whether it was delivered)
+</ResponseField>
+
+<ResponseField name="target_agent" type="string">
+  The resolved target agent name
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message (currently always indicates validation only)
+</ResponseField>
+
+### Example
+
+```json
+{
+  "target": "research-agent",
+  "message": "Please compile a summary of recent developments in AI safety research, focusing on papers from the last 3 months."
+}
+```
+
+<Info>
+**Communication graph**: Agent links define which agents can communicate and in which directions. Links can be:
+- `bidirectional`: Both agents can initiate messages
+- `one_way`: Only the `from_agent` can initiate messages
+
+The tool validates link existence and direction before accepting messages.
+</Info>
+
+<Note>
+**Future implementation**: This will create a task in the target agent's task store rather than sending a direct message. The task system is the intended mechanism for cross-agent delegation.
+</Note>

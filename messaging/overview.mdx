@@ -1,0 +1,205 @@
+---
+title: Messaging System Overview
+description: Connect Spacebot to Discord, Slack, Telegram, Twitch, and Email.
+---
+
+Spacebot's messaging system connects your AI agents to multiple communication platforms through native adapters. Each adapter provides full platform integration with real-time message handling, file attachments, rich formatting, and status indicators.
+
+## Supported Platforms
+
+<CardGroup cols={2}>
+  <Card title="Discord" icon="discord" href="/messaging/discord-setup">
+    Discord servers with full support for threads, embeds, buttons, and polls
+  </Card>
+  <Card title="Slack" icon="slack" href="/messaging/slack-setup">
+    Slack workspaces with Block Kit, slash commands, and ephemeral messages
+  </Card>
+  <Card title="Telegram" icon="telegram" href="/messaging/telegram-setup">
+    Telegram groups and DMs with media attachments and inline keyboards
+  </Card>
+  <Card title="Twitch" icon="twitch" href="/messaging/twitch-setup">
+    Twitch chat integration with trigger prefixes and user filtering
+  </Card>
+  <Card title="Email" icon="envelope" href="/messaging/email-setup">
+    IMAP/SMTP email with threading support and attachment handling
+  </Card>
+</CardGroup>
+
+## Architecture
+
+Each messaging adapter runs independently with its own connection lifecycle:
+
+- **Discord** uses Serenity with Gateway events and full cache
+- **Slack** uses Socket Mode for real-time events without webhooks
+- **Telegram** uses long polling via the Bot API
+- **Twitch** connects via IRC with OAuth token refresh
+- **Email** polls IMAP folders and sends via SMTP
+
+All adapters implement the `Messaging` trait with consistent APIs for sending messages, handling status updates, streaming responses, and fetching history.
+
+## Features
+
+### Message Types
+
+Every adapter supports:
+
+- **Plain text** with automatic length-aware chunking
+- **File attachments** (images, documents, any mime type)
+- **Reactions** (emoji reactions on messages)
+- **Threading** (conversation isolation in threads)
+- **Status indicators** (typing/thinking indicators while processing)
+
+### Platform-Specific Features
+
+<AccordionGroup>
+  <Accordion title="Discord">
+    - Rich embeds with fields, colors, and footers
+    - Interactive buttons (primary, secondary, success, danger, link)
+    - Select menus with custom options
+    - Polls with multiple answers and multiselect
+    - Thread creation with automatic fallback to regular messages
+    - Message history backfill (up to 100 messages)
+  </Accordion>
+
+  <Accordion title="Slack">
+    - Block Kit messages with sections, dividers, and actions
+    - Slash commands routed to specific agents
+    - Ephemeral messages (visible only to triggering user)
+    - Scheduled messages via `chat.scheduleMessage`
+    - Streaming responses via message edits
+    - User and channel metadata resolution
+  </Accordion>
+
+  <Accordion title="Telegram">
+    - Markdown formatting (bold, italic, code)
+    - Inline keyboards with callback buttons
+    - File downloads via authenticated URLs
+    - Chat action indicators (typing, uploading)
+    - Poll creation with quiz mode support
+    - Group and private chat filtering
+  </Accordion>
+
+  <Accordion title="Twitch">
+    - Trigger prefix filtering (e.g., `!ask`)
+    - User allowlist for access control
+    - Channel-specific agent routing
+    - Automatic OAuth token refresh
+    - Rate limit handling (20 msg/30s, 100 for mods)
+  </Accordion>
+
+  <Accordion title="Email">
+    - Thread detection via References and In-Reply-To headers
+    - HTML email rendering with automatic text conversion
+    - Multi-folder polling (INBOX, custom folders)
+    - Attachment size limits and filtering
+    - Sender allowlist with domain wildcards
+    - Auto-generated email filtering (no bounce/autoreply processing)
+  </Accordion>
+</AccordionGroup>
+
+## Message Coalescing
+
+Spacebot includes a message coalescing system that detects rapid-fire message bursts and batches them into a single LLM turn. This prevents the agent from responding to every individual message in a fast-moving channel.
+
+<Info>
+**How it works:** When messages arrive within a configurable debounce window (default 2 seconds), they're grouped together. The LLM receives all messages in the batch and can choose to respond to the most interesting one, address multiple points, or stay quiet.
+</Info>
+
+Coalescing is enabled by default on Discord and Slack. DMs bypass coalescing entirely — every DM gets an immediate response.
+
+## Bindings
+
+Bindings connect conversations to agents. Each binding maps a platform conversation to a specific agent ID.
+
+```toml config.toml
+[[bindings]]
+agent_id = "main"
+channel = "discord"
+guild_id = "123456789"
+
+[[bindings]]
+agent_id = "support"
+channel = "slack"
+workspace_id = "T01234ABCDE"
+channel_ids = ["C0001", "C0002"]
+
+[[bindings]]
+agent_id = "notifications"
+channel = "email"
+```
+
+You can route different Discord servers, Slack workspaces, Telegram chats, or email addresses to different agents. Each agent maintains separate memory, identity, and conversation history.
+
+## Permissions and Filtering
+
+All adapters support hot-reloadable permission filtering:
+
+- **Guild/Workspace filter** — only respond in specific servers or workspaces
+- **Channel filter** — only respond in specific channels
+- **DM allowlist** — only accept DMs from specific user IDs
+- **User allowlist** (Twitch, Email) — restrict who can interact
+
+Permissions reload automatically within seconds when you update the config. No restart needed.
+
+<Warning>
+DM filtering defaults to **block all** on Discord, Slack, and Telegram. You must explicitly add user IDs to `dm_allowed_users` to enable DMs.
+</Warning>
+
+## Streaming Responses
+
+Adapters that support message editing can stream LLM responses word-by-word:
+
+- **Discord** — edits a placeholder message with incremental content
+- **Slack** — edits via `chat.update` with rate-limit-aware throttling
+- **Telegram** — edits with 1-second minimum interval to avoid rate limits
+
+Twitch and Email don't support streaming (IRC and SMTP are send-only protocols).
+
+## Multi-Instance Support
+
+You can run multiple instances of the same platform adapter with different credentials:
+
+```toml config.toml
+[messaging.discord]
+token = "env:DISCORD_BOT_TOKEN_1"
+
+[[messaging.discord.instances]]
+runtime_key = "discord-2"
+token = "env:DISCORD_BOT_TOKEN_2"
+
+[[bindings]]
+agent_id = "community"
+channel = "discord"  # Uses primary instance
+guild_id = "111111"
+
+[[bindings]]
+agent_id = "internal"
+channel = "discord"
+adapter = "discord-2"  # Routes to instance by runtime_key
+guild_id = "222222"
+```
+
+This is useful for separating public and private bots, or running agents in multiple organizations.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Discord Setup" icon="discord" href="/messaging/discord-setup">
+    Create a bot and connect to your server
+  </Card>
+  <Card title="Slack Setup" icon="slack" href="/messaging/slack-setup">
+    Configure Socket Mode and app tokens
+  </Card>
+  <Card title="Telegram Setup" icon="telegram" href="/messaging/telegram-setup">
+    Get a bot token from BotFather
+  </Card>
+  <Card title="Twitch Setup" icon="twitch" href="/messaging/twitch-setup">
+    Set up OAuth and join channels
+  </Card>
+  <Card title="Email Setup" icon="envelope" href="/messaging/email-setup">
+    Configure IMAP polling and SMTP delivery
+  </Card>
+  <Card title="Configuration Reference" icon="sliders" href="/configuration/config">
+    Full messaging config options
+  </Card>
+</CardGroup>

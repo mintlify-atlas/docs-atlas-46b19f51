@@ -1,0 +1,362 @@
+---
+title: Worker Tools
+description: Tools available to worker processes for shell execution, file operations, and browser automation
+---
+
+Workers are task-focused processes with no conversation context. They get a specific job, appropriate tools, and report back when done. Workers operate within a sandboxed workspace directory.
+
+## shell
+
+Execute shell commands within the sandboxed workspace environment.
+
+<ParamField path="command" type="string" required>
+  The shell command to execute. Runs with `sh -c` on Unix or `cmd /C` on Windows.
+</ParamField>
+
+<ParamField path="working_dir" type="string">
+  Optional working directory where the command should run. Must be within the workspace boundary.
+</ParamField>
+
+<ParamField path="timeout_seconds" type="integer" default={60}>
+  Maximum time to wait for the command to complete (1-300 seconds)
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the command succeeded (exit code 0)
+</ResponseField>
+
+<ResponseField name="exit_code" type="integer">
+  The command exit code
+</ResponseField>
+
+<ResponseField name="stdout" type="string">
+  Standard output from the command
+</ResponseField>
+
+<ResponseField name="stderr" type="string">
+  Standard error from the command
+</ResponseField>
+
+<ResponseField name="summary" type="string">
+  Formatted summary of the command output
+</ResponseField>
+
+### Example
+
+```json
+{
+  "command": "cargo test --all",
+  "working_dir": "project",
+  "timeout_seconds": 120
+}
+```
+
+<Warning>
+Output is truncated if it exceeds the maximum tool output size. Use file redirection for large outputs.
+</Warning>
+
+---
+
+## file
+
+Read, write, or list files within the workspace directory. All paths are restricted to the workspace boundary.
+
+<ParamField path="operation" type="string" required>
+  The file operation: `"read"`, `"write"`, or `"list"`
+</ParamField>
+
+<ParamField path="path" type="string" required>
+  The file or directory path. Relative paths are resolved from the workspace root. Absolute paths are accepted only if they fall within the workspace.
+</ParamField>
+
+<ParamField path="content" type="string">
+  Content to write to the file (required for write operation)
+</ParamField>
+
+<ParamField path="create_dirs" type="boolean" default={true}>
+  For write operations: create parent directories if they don't exist
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the operation succeeded
+</ResponseField>
+
+<ResponseField name="operation" type="string">
+  The operation performed
+</ResponseField>
+
+<ResponseField name="path" type="string">
+  The file/directory path
+</ResponseField>
+
+<ResponseField name="content" type="string">
+  File content (for read operations)
+</ResponseField>
+
+<ResponseField name="entries" type="array">
+  Directory entries (for list operations). Each entry has name, entry_type ("file", "directory", or "other"), and size in bytes.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message if the operation failed
+</ResponseField>
+
+### Example: Read a file
+
+```json
+{
+  "operation": "read",
+  "path": "src/main.rs"
+}
+```
+
+### Example: Write a file
+
+```json
+{
+  "operation": "write",
+  "path": "output/results.json",
+  "content": "{\"status\": \"complete\"}",
+  "create_dirs": true
+}
+```
+
+### Example: List directory
+
+```json
+{
+  "operation": "list",
+  "path": "src"
+}
+```
+
+<Note>
+Identity files (SOUL.md, IDENTITY.md, USER.md) are readable but cannot be modified through file operations. Symlinks within the workspace are blocked for security.
+</Note>
+
+---
+
+## exec
+
+Run subprocesses with full control over arguments and environment variables. Sandboxed to the workspace directory.
+
+<ParamField path="program" type="string" required>
+  The program or binary to execute (e.g., "cargo", "python", "node")
+</ParamField>
+
+<ParamField path="args" type="array" default={[]}>
+  Arguments to pass to the program (array of strings)
+</ParamField>
+
+<ParamField path="working_dir" type="string">
+  Optional working directory for the execution. Must be within the workspace.
+</ParamField>
+
+<ParamField path="env" type="array" default={[]}>
+  Environment variables to set. Each entry has `key` and `value` fields.
+  
+  **Blocked variables** (for security): LD_PRELOAD, LD_LIBRARY_PATH, DYLD_INSERT_LIBRARIES, DYLD_LIBRARY_PATH, PYTHONPATH, PYTHONSTARTUP, NODE_OPTIONS, RUBYOPT, PERL5OPT, PERL5LIB, BASH_ENV, ENV
+</ParamField>
+
+<ParamField path="timeout_seconds" type="integer" default={60}>
+  Maximum time to wait (1-300 seconds)
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the execution succeeded
+</ResponseField>
+
+<ResponseField name="exit_code" type="integer">
+  The exit code
+</ResponseField>
+
+<ResponseField name="stdout" type="string">
+  Standard output
+</ResponseField>
+
+<ResponseField name="stderr" type="string">
+  Standard error
+</ResponseField>
+
+<ResponseField name="summary" type="string">
+  Formatted summary of the output
+</ResponseField>
+
+### Example
+
+```json
+{
+  "program": "cargo",
+  "args": ["build", "--release"],
+  "working_dir": "project",
+  "env": [
+    {"key": "RUST_BACKTRACE", "value": "1"}
+  ],
+  "timeout_seconds": 300
+}
+```
+
+---
+
+## browser
+
+Browser automation via headless Chrome. Supports navigation, element interaction, screenshots, and page observation using an accessibility-tree based reference system.
+
+<ParamField path="action" type="string" required>
+  The browser action to perform:
+  - `"launch"`: Start the browser (required before other actions)
+  - `"navigate"`: Navigate to a URL
+  - `"open"`: Open a new tab
+  - `"tabs"`: List all open tabs
+  - `"focus"`: Switch to a tab by target ID
+  - `"close_tab"`: Close a tab
+  - `"snapshot"`: Get accessibility tree with element references
+  - `"act"`: Interact with an element
+  - `"screenshot"`: Capture a screenshot
+  - `"evaluate"`: Run JavaScript (if enabled)
+  - `"content"`: Get page HTML
+  - `"close"`: Shut down the browser
+</ParamField>
+
+<ParamField path="url" type="string">
+  URL for navigate/open actions. Must be http or https. Private/loopback IPs and cloud metadata endpoints are blocked for security.
+</ParamField>
+
+<ParamField path="target_id" type="string">
+  Tab target ID for focus/close_tab actions
+</ParamField>
+
+<ParamField path="element_ref" type="string">
+  Element reference from snapshot (e.g., "e3") for act/screenshot actions
+</ParamField>
+
+<ParamField path="act_kind" type="string">
+  Kind of interaction for the act action:
+  - `"click"`: Click an element
+  - `"type"`: Type text into an element
+  - `"press_key"`: Press a keyboard key (e.g., "Enter", "Tab")
+  - `"hover"`: Hover over an element
+  - `"scroll_into_view"`: Scroll element into viewport
+  - `"focus"`: Focus an element
+</ParamField>
+
+<ParamField path="text" type="string">
+  Text to type for act:type
+</ParamField>
+
+<ParamField path="key" type="string">
+  Key to press for act:press_key (e.g., "Enter", "Tab", "Escape")
+</ParamField>
+
+<ParamField path="full_page" type="boolean" default={false}>
+  Take full-page screenshot instead of viewport only
+</ParamField>
+
+<ParamField path="script" type="string">
+  JavaScript expression to evaluate (requires evaluate_enabled in config)
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the action succeeded
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable result message
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  Page title (when available)
+</ResponseField>
+
+<ResponseField name="url" type="string">
+  Current URL (when available)
+</ResponseField>
+
+<ResponseField name="elements" type="array">
+  Snapshot data from accessibility tree. Each element has ref_id, role, name, description, and value.
+</ResponseField>
+
+<ResponseField name="tabs" type="array">
+  List of open tabs with target_id, title, url, and active status
+</ResponseField>
+
+<ResponseField name="screenshot_path" type="string">
+  Path to saved screenshot file
+</ResponseField>
+
+<ResponseField name="eval_result" type="object">
+  JavaScript evaluation result
+</ResponseField>
+
+<ResponseField name="content" type="string">
+  Page HTML content (truncated if >100KB)
+</ResponseField>
+
+### Example: Navigate and interact
+
+```json
+// 1. Launch browser
+{"action": "launch"}
+
+// 2. Navigate to site
+{"action": "navigate", "url": "https://example.com"}
+
+// 3. Get interactive elements
+{"action": "snapshot"}
+
+// 4. Click a button (using ref from snapshot)
+{
+  "action": "act",
+  "act_kind": "click",
+  "element_ref": "e5"
+}
+
+// 5. Type into a search box
+{
+  "action": "act",
+  "act_kind": "type",
+  "element_ref": "e2",
+  "text": "search query"
+}
+
+// 6. Take a screenshot
+{"action": "screenshot", "full_page": true}
+```
+
+<Tip>
+Always run `snapshot` before interacting with elements to get current element references. References are cleared on navigation.
+</Tip>
+
+---
+
+## set_status
+
+Update your worker status to give the channel visibility into your progress. Status appears in the channel's status block.
+
+<ParamField path="status" type="string" required>
+  A concise status message describing your current progress (1-2 sentences). Maximum 256 characters.
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the status was set
+</ResponseField>
+
+<ResponseField name="worker_id" type="string">
+  Your worker ID
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  The status that was set (may be truncated)
+</ResponseField>
+
+### Example
+
+```json
+{
+  "status": "Running test suite... 24/42 tests passed so far"
+}
+```
+
+<Note>
+Use `set_status` periodically during long-running tasks so the user knows you're making progress.
+</Note>

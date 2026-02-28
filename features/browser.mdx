@@ -1,0 +1,461 @@
+---
+title: 'Browser Automation'
+description: 'Headless Chrome automation for workers'
+---
+
+Workers can launch and control a headless Chrome browser for web automation, testing, and scraping. The browser tool uses an accessibility-tree based approach for LLM-friendly element addressing.
+
+## Configuration
+
+Configure browser behavior in `agent.toml`:
+
+```toml agent.toml
+[browser]
+headless = true
+evaluate_enabled = false
+executable_path = "/usr/bin/chromium"  # Optional
+```
+
+<ParamField path="headless" type="boolean">
+  Run Chrome in headless mode (default: true)
+</ParamField>
+
+<ParamField path="evaluate_enabled" type="boolean">
+  Allow JavaScript evaluation via the `evaluate` action (default: false)
+</ParamField>
+
+<ParamField path="executable_path" type="string">
+  Path to Chrome/Chromium binary. Auto-detected if not set.
+</ParamField>
+
+<Warning>
+  **JavaScript evaluation is disabled by default** for security. Only enable if you trust the worker's task.
+</Warning>
+
+## Browser Actions
+
+The `browser` tool supports these actions:
+
+<AccordionGroup>
+  <Accordion title="launch" icon="rocket">
+    Start the browser. Must be called before any other action.
+    
+    ```json
+    {"action": "launch"}
+    ```
+  </Accordion>
+  <Accordion title="navigate" icon="compass">
+    Go to a URL.
+    
+    ```json
+    {"action": "navigate", "url": "https://example.com"}
+    ```
+    
+    Returns page title and URL after navigation.
+  </Accordion>
+  <Accordion title="open" icon="window">
+    Open a new tab.
+    
+    ```json
+    {"action": "open", "url": "https://example.com"}
+    ```
+    
+    Returns the new tab's target ID.
+  </Accordion>
+  <Accordion title="tabs" icon="browser">
+    List all open tabs.
+    
+    ```json
+    {"action": "tabs"}
+    ```
+    
+    Returns tab metadata (target ID, title, URL, active state).
+  </Accordion>
+  <Accordion title="focus" icon="crosshairs">
+    Switch to a different tab.
+    
+    ```json
+    {"action": "focus", "target_id": "tab-abc-123"}
+    ```
+  </Accordion>
+  <Accordion title="close_tab" icon="xmark">
+    Close a tab.
+    
+    ```json
+    {"action": "close_tab", "target_id": "tab-abc-123"}
+    ```
+    
+    Omit `target_id` to close the active tab.
+  </Accordion>
+  <Accordion title="snapshot" icon="sitemap">
+    Get an accessibility tree with element refs.
+    
+    ```json
+    {"action": "snapshot"}
+    ```
+    
+    Returns up to 200 interactive elements with refs like `e1`, `e2`, etc.
+  </Accordion>
+  <Accordion title="act" icon="hand-pointer">
+    Interact with an element.
+    
+    ```json
+    {
+      "action": "act",
+      "element_ref": "e3",
+      "act_kind": "click"
+    }
+    ```
+    
+    See [Element Interactions](#element-interactions) for details.
+  </Accordion>
+  <Accordion title="screenshot" icon="camera">
+    Capture the page or an element.
+    
+    ```json
+    {"action": "screenshot", "full_page": true}
+    ```
+    
+    Saves to `screenshot_dir` with timestamp filename.
+  </Accordion>
+  <Accordion title="evaluate" icon="code">
+    Run JavaScript (requires `evaluate_enabled = true`).
+    
+    ```json
+    {
+      "action": "evaluate",
+      "script": "document.title"
+    }
+    ```
+    
+    Returns the script's result as JSON.
+  </Accordion>
+  <Accordion title="content" icon="file-code">
+    Get the page's HTML.
+    
+    ```json
+    {"action": "content"}
+    ```
+    
+    Returns HTML, truncated to 100KB if needed.
+  </Accordion>
+  <Accordion title="close" icon="power-off">
+    Shut down the browser.
+    
+    ```json
+    {"action": "close"}
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Element Interactions
+
+Elements are addressed by refs (`e1`, `e2`, ...) from the accessibility tree:
+
+<Tabs>
+  <Tab title="click">
+    ```json
+    {
+      "action": "act",
+      "element_ref": "e5",
+      "act_kind": "click"
+    }
+    ```
+  </Tab>
+  <Tab title="type">
+    ```json
+    {
+      "action": "act",
+      "element_ref": "e12",
+      "act_kind": "type",
+      "text": "hello@example.com"
+    }
+    ```
+  </Tab>
+  <Tab title="press_key">
+    ```json
+    {
+      "action": "act",
+      "act_kind": "press_key",
+      "key": "Enter"
+    }
+    ```
+    
+    Omit `element_ref` to send the key to the page.
+  </Tab>
+  <Tab title="hover">
+    ```json
+    {
+      "action": "act",
+      "element_ref": "e8",
+      "act_kind": "hover"
+    }
+    ```
+  </Tab>
+  <Tab title="scroll_into_view">
+    ```json
+    {
+      "action": "act",
+      "element_ref": "e20",
+      "act_kind": "scroll_into_view"
+    }
+    ```
+  </Tab>
+  <Tab title="focus">
+    ```json
+    {
+      "action": "act",
+      "element_ref": "e3",
+      "act_kind": "focus"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Accessibility Tree Snapshot
+
+The `snapshot` action returns interactive elements:
+
+```json
+{
+  "success": true,
+  "message": "42 interactive element(s) found",
+  "title": "Example Page",
+  "url": "https://example.com",
+  "elements": [
+    {
+      "ref_id": "e1",
+      "role": "button",
+      "name": "Sign In",
+      "description": "Submit login form"
+    },
+    {
+      "ref_id": "e2",
+      "role": "textbox",
+      "name": "Email",
+      "value": ""
+    },
+    {
+      "ref_id": "e3",
+      "role": "link",
+      "name": "Forgot password?",
+      "description": null
+    }
+  ]
+}
+```
+
+<ParamField path="ref_id" type="string">
+  Short identifier for use in `act` calls (e.g., `e1`, `e2`)
+</ParamField>
+
+<ParamField path="role" type="string">
+  ARIA role: `button`, `link`, `textbox`, `checkbox`, etc.
+</ParamField>
+
+<ParamField path="name" type="string">
+  Accessible name (usually visible text or aria-label)
+</ParamField>
+
+<ParamField path="description" type="string">
+  Accessible description (aria-description or title)
+</ParamField>
+
+<ParamField path="value" type="string">
+  Current value for inputs, sliders, etc.
+</ParamField>
+
+Only interactive roles are included:
+
+```rust src/tools/browser.rs
+const INTERACTIVE_ROLES: &[&str] = &[
+    "button", "checkbox", "combobox", "link", "listbox", "menu",
+    "menubar", "menuitem", "menuitemcheckbox", "menuitemradio",
+    "option", "radio", "scrollbar", "searchbox", "slider",
+    "spinbutton", "switch", "tab", "textbox", "treeitem",
+];
+```
+
+Max 200 elements per snapshot to keep output manageable.
+
+## Workflow Example
+
+<Steps>
+  <Step title="Launch">
+    ```json
+    {"action": "launch"}
+    ```
+  </Step>
+  <Step title="Navigate">
+    ```json
+    {"action": "navigate", "url": "https://example.com/login"}
+    ```
+  </Step>
+  <Step title="Snapshot">
+    ```json
+    {"action": "snapshot"}
+    ```
+    
+    Find textbox with name "Email" → `e2`
+  </Step>
+  <Step title="Type Email">
+    ```json
+    {
+      "action": "act",
+      "element_ref": "e2",
+      "act_kind": "type",
+      "text": "user@example.com"
+    }
+    ```
+  </Step>
+  <Step title="Type Password">
+    Snapshot again if needed, or use next textbox ref `e3`:
+    
+    ```json
+    {
+      "action": "act",
+      "element_ref": "e3",
+      "act_kind": "type",
+      "text": "password123"
+    }
+    ```
+  </Step>
+  <Step title="Click Submit">
+    ```json
+    {
+      "action": "act",
+      "element_ref": "e1",
+      "act_kind": "click"
+    }
+    ```
+  </Step>
+  <Step title="Screenshot">
+    ```json
+    {"action": "screenshot"}
+    ```
+    
+    Returns path to saved screenshot.
+  </Step>
+  <Step title="Close">
+    ```json
+    {"action": "close"}
+    ```
+  </Step>
+</Steps>
+
+## Security
+
+<Warning>
+  **URL validation blocks private networks:**
+  - Loopback (127.0.0.0/8, ::1)
+  - Private ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+  - Link-local (169.254.0.0/16, fe80::/10)
+  - Cloud metadata (169.254.169.254, metadata.google.internal)
+</Warning>
+
+This prevents SSRF attacks. Only `http` and `https` schemes are allowed.
+
+```rust src/tools/browser.rs
+fn validate_url(url: &str) -> Result<(), BrowserError> {
+    let parsed = Url::parse(url)?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => return Err(BrowserError::new(
+            format!("scheme '{other}' is not allowed")
+        )),
+    }
+    // Check for blocked IPs...
+}
+```
+
+<Note>
+  JavaScript evaluation is off by default. Enable only for trusted tasks.
+</Note>
+
+## Screenshots
+
+Screenshots are saved to `screenshot_dir` with timestamped names:
+
+```
+screenshot_20260228_143052_123.png
+```
+
+<Tabs>
+  <Tab title="Viewport">
+    ```json
+    {"action": "screenshot"}
+    ```
+    
+    Captures visible area only.
+  </Tab>
+  <Tab title="Full Page">
+    ```json
+    {"action": "screenshot", "full_page": true}
+    ```
+    
+    Scrolls and stitches entire page.
+  </Tab>
+  <Tab title="Element">
+    ```json
+    {
+      "action": "screenshot",
+      "element_ref": "e5"
+    }
+    ```
+    
+    Captures just the element's bounding box.
+  </Tab>
+</Tabs>
+
+Screenshot paths are returned in the tool output for reference.
+
+## Performance Notes
+
+<AccordionGroup>
+  <Accordion title="Browser state persists">
+    The browser stays open across multiple tool calls within a worker. Launch once, reuse.
+  </Accordion>
+  <Accordion title="Snapshots are fast">
+    Accessibility tree extraction takes ~100ms. Use liberally to understand the page.
+  </Accordion>
+  <Accordion title="Element refs expire on navigation">
+    Element refs are cleared when you navigate to a new page. Take a fresh snapshot after navigation.
+  </Accordion>
+  <Accordion title="No sandbox escape">
+    The browser runs in a separate process. Even if compromised, it's isolated from Spacebot.
+  </Accordion>
+</AccordionGroup>
+
+## Debugging
+
+Enable headed mode to watch the browser:
+
+```toml
+[browser]
+headless = false
+```
+
+The browser window opens at 1280x900 and stays visible during worker execution.
+
+Logs include CDP errors:
+
+```
+[ERROR] browser: navigation failed: net::ERR_NAME_NOT_RESOLVED
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Snapshot Before Interact" icon="camera">
+    Always take a snapshot to discover elements. Don't guess element refs.
+  </Card>
+  <Card title="Use Names, Not Positions" icon="tag">
+    Find elements by name/role, not by ref number. Refs change between snapshots.
+  </Card>
+  <Card title="Handle Missing Elements" icon="question">
+    Check snapshot results before acting. Elements may not exist (dynamic content, slow load).
+  </Card>
+  <Card title="Close When Done" icon="door-open">
+    Call `{"action": "close"}` at the end to free resources.
+  </Card>
+</CardGroup>

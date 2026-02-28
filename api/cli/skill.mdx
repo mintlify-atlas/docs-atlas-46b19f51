@@ -1,0 +1,391 @@
+---
+title: spacebot skill
+description: Manage Spacebot skills
+---
+
+## Overview
+
+Skills extend agent capabilities with specialized instructions, workflows, and bundled resources. The `spacebot skill` command manages installation, listing, and removal of skills.
+
+## Subcommands
+
+- [`add`](#add) - Install a skill from GitHub or skills.sh registry
+- [`install`](#install) - Install a skill from a .skill file
+- [`list`](#list) - List installed skills
+- [`remove`](#remove) - Remove an installed skill
+- [`info`](#info) - Show skill details
+
+---
+
+## add
+
+Install a skill from GitHub or the skills.sh registry.
+
+### Usage
+
+```bash
+spacebot skill add <SPEC> [OPTIONS]
+```
+
+### Arguments
+
+<ParamField path="SPEC" type="string" required>
+  Skill specification. Formats:
+  - `owner/repo` - Install all skills from the repository
+  - `owner/repo/skill-name` - Install a specific skill from the repository
+</ParamField>
+
+### Options
+
+<ParamField path="--agent" type="string">
+  Agent ID to install the skill for. Defaults to the first agent in your configuration.
+</ParamField>
+
+<ParamField path="--instance" type="boolean" default="false">
+  Install to the instance-level skills directory, making it available to all agents.
+</ParamField>
+
+### Examples
+
+#### Install from GitHub
+
+```bash
+spacebot skill add opencode/skills
+```
+
+Output:
+```
+Installing skill from: opencode/skills
+Target directory: /home/user/.spacebot/agents/default/skills
+
+Successfully installed 3 skill(s):
+  - doc-reader
+  - doc-author
+  - update-nav
+```
+
+#### Install specific skill
+
+```bash
+spacebot skill add opencode/skills/doc-reader
+```
+
+Output:
+```
+Installing skill from: opencode/skills/doc-reader
+Target directory: /home/user/.spacebot/agents/default/skills
+
+Successfully installed 1 skill(s):
+  - doc-reader
+```
+
+#### Install for specific agent
+
+```bash
+spacebot skill add opencode/skills --agent coding-assistant
+```
+
+#### Install instance-wide
+
+```bash
+spacebot skill add opencode/skills --instance
+```
+
+Output:
+```
+Installing skill from: opencode/skills
+Target directory: /home/user/.spacebot/skills
+
+Successfully installed 3 skill(s):
+  - doc-reader
+  - doc-author
+  - update-nav
+```
+
+### Skill Sources
+
+- **GitHub**: Fetches from `https://github.com/owner/repo`
+- **Registry**: Resolves short names via skills.sh registry (future feature)
+
+---
+
+## install
+
+Install a skill from a local `.skill` file.
+
+### Usage
+
+```bash
+spacebot skill install <PATH> [OPTIONS]
+```
+
+### Arguments
+
+<ParamField path="PATH" type="path" required>
+  Path to the `.skill` file to install.
+</ParamField>
+
+### Options
+
+<ParamField path="--agent" type="string">
+  Agent ID to install the skill for. Defaults to the first agent in your configuration.
+</ParamField>
+
+<ParamField path="--instance" type="boolean" default="false">
+  Install to the instance-level skills directory, making it available to all agents.
+</ParamField>
+
+### Examples
+
+#### Install from local file
+
+```bash
+spacebot skill install ./custom-skill/SKILL.md
+```
+
+Output:
+```
+Installing skill from: ./custom-skill/SKILL.md
+Target directory: /home/user/.spacebot/agents/default/skills
+
+Successfully installed 1 skill(s):
+  - custom-skill
+```
+
+#### Install with absolute path
+
+```bash
+spacebot skill install /etc/spacebot/skills/enterprise.skill
+```
+
+---
+
+## list
+
+List all installed skills for an agent.
+
+### Usage
+
+```bash
+spacebot skill list [OPTIONS]
+```
+
+### Options
+
+<ParamField path="--agent" type="string">
+  Agent ID to list skills for. Defaults to the first agent in your configuration.
+</ParamField>
+
+### Examples
+
+#### List skills
+
+```bash
+spacebot skill list
+```
+
+Output:
+```
+Installed skills (5):
+
+  doc-reader (instance)
+    Read and navigate external documentation efficiently.
+
+  doc-author (instance)
+    Write, edit, and maintain documentation.
+
+  mintlify (workspace)
+    Comprehensive reference for building Mintlify documentation sites.
+
+  update-nav (workspace)
+    Add new pages to docs.json navigation structure.
+
+  custom-analysis (workspace)
+    Analyze code complexity and suggest refactorings.
+```
+
+#### List for specific agent
+
+```bash
+spacebot skill list --agent coding-assistant
+```
+
+### Output Format
+
+Each skill shows:
+- **Name**: The skill identifier
+- **Source**: `instance` (shared across agents) or `workspace` (agent-specific)
+- **Description**: One-line summary from the skill file
+
+---
+
+## remove
+
+Remove an installed skill.
+
+### Usage
+
+```bash
+spacebot skill remove <NAME> [OPTIONS]
+```
+
+### Arguments
+
+<ParamField path="NAME" type="string" required>
+  The name of the skill to remove.
+</ParamField>
+
+### Options
+
+<ParamField path="--agent" type="string">
+  Agent ID the skill is installed for. Defaults to the first agent in your configuration.
+</ParamField>
+
+### Examples
+
+#### Remove skill
+
+```bash
+spacebot skill remove doc-reader
+```
+
+Output:
+```
+Removed skill: doc-reader
+Path: /home/user/.spacebot/agents/default/skills/doc-reader
+```
+
+#### Skill not found
+
+```bash
+$ spacebot skill remove nonexistent
+Skill not found: nonexistent
+```
+
+Exit code: 1
+
+---
+
+## info
+
+Show detailed information about an installed skill.
+
+### Usage
+
+```bash
+spacebot skill info <NAME> [OPTIONS]
+```
+
+### Arguments
+
+<ParamField path="NAME" type="string" required>
+  The name of the skill to inspect.
+</ParamField>
+
+### Options
+
+<ParamField path="--agent" type="string">
+  Agent ID the skill is installed for. Defaults to the first agent in your configuration.
+</ParamField>
+
+### Examples
+
+#### Show skill info
+
+```bash
+spacebot skill info doc-reader
+```
+
+Output:
+```
+Skill: doc-reader
+Description: Read and navigate external documentation efficiently.
+Source: instance
+Path: /home/user/.spacebot/skills/doc-reader/SKILL.md
+Base directory: /home/user/.spacebot/skills/doc-reader
+
+Content preview (first 500 chars):
+
+# doc-reader skill
+
+Read and navigate external documentation efficiently. Invoke when the task requires checking how a specific function, endpoint, or configuration option works; when the user references an API, SDK, library, or third-party tool by name; when any docs URL or documentation site is mentioned; or when implementing something that depends on an external service or package.
+
+## Usage
+
+1. Identify the documentation URL
+2. Fetch the page content
+3. Extract relevant sections
+4. Summarize for the use...
+
+... (1247 more characters)
+```
+
+---
+
+## Skill Resolution
+
+When loading skills for an agent, Spacebot searches two directories:
+
+1. **Instance-level** (`~/.spacebot/skills/`) - Shared across all agents
+2. **Workspace-level** (`~/.spacebot/agents/{agent_id}/skills/`) - Agent-specific
+
+Workspace skills override instance skills with the same name.
+
+## Skill File Format
+
+Skills are markdown files (`.md` or `.skill`) with:
+
+```markdown
+# skill-name
+
+One-line description here.
+
+## Detailed instructions
+
+...
+```
+
+Skills can bundle additional resources (scripts, templates, references) in the same directory.
+
+## Error Cases
+
+### No agents configured
+
+```bash
+$ spacebot skill list
+Error: no agents configured
+```
+
+Solution: Configure at least one agent in `~/.spacebot/config.toml`.
+
+### Agent not found
+
+```bash
+$ spacebot skill list --agent nonexistent
+Error: agent not found: nonexistent
+```
+
+Solution: Use `--agent` with a valid agent ID from your config.
+
+### GitHub fetch failure
+
+```bash
+$ spacebot skill add invalid/repo
+Error: failed to install skill
+Caused by:
+    HTTP 404: Repository not found
+```
+
+Solution: Verify the repository exists and is public.
+
+## Related Commands
+
+- [`spacebot start`](/api/cli/start) - Restart daemon to load new skills
+- [`spacebot status`](/api/cli/status) - Verify daemon is running
+
+## Implementation Notes
+
+- Skills are loaded at agent initialization time
+- Adding/removing skills requires a daemon restart to take effect
+- Skill names must be unique within an agent's resolution scope
+- The `.skill` extension is optional (`.md` files work too)

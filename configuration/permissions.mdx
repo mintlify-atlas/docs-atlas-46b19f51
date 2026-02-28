@@ -1,0 +1,329 @@
+---
+title: 'Permission System'
+description: 'Security and sandboxing for Spacebot agents'
+---
+
+# Permission System
+
+Spacebot uses defense-in-depth to contain what worker processes can do when executing arbitrary shell commands and subprocesses. The permission system operates at multiple layers: OS-level filesystem sandboxing, application-level path validation, secret leak detection, and OpenCode permission modes.
+
+## Sandbox Configuration
+
+Worker processes run inside OS-level filesystem containment. On Linux, [bubblewrap](https://github.com/containers/bubblewrap) creates a mount namespace where the entire filesystem is read-only except the agent's workspace and explicitly configured writable paths. On macOS, `sandbox-exec` enforces equivalent restrictions via SBPL profiles.
+
+### Per-Agent Sandbox
+
+Configure sandbox settings in your agent definition:
+
+```toml
+[[agents]]
+id = "my-agent"
+
+[agents.sandbox]
+mode = "enabled"  # or "disabled"
+writable_paths = [
+  "/home/user/projects/myapp",
+  "/tmp/agent-scratch"
+]
+```
+
+<ParamField path="agents[].sandbox.mode" type="string" default="enabled">
+  Sandbox enforcement mode:
+  - `enabled` — OS-level containment (default, recommended)
+  - `disabled` — No containment, full host access (use with caution)
+</ParamField>
+
+<ParamField path="agents[].sandbox.writable_paths" type="array">
+  Additional writable directories beyond the agent's workspace. Paths must exist at startup or they will be ignored with a warning.
+</ParamField>
+
+### Default Permissions
+
+When sandbox mode is `enabled`:
+
+<Accordion title="Read-only access">
+  - Entire host filesystem is read-only by default
+  - `/dev` is mounted with standard device nodes
+  - `/proc` is mounted fresh (Linux only, if supported)
+  - `/tmp` is a private tmpfs per invocation
+</Accordion>
+
+<Accordion title="Write access">
+  - Agent workspace directory (always writable)
+  - Paths listed in `writable_paths` (if they exist)
+  - Private `/tmp` directory
+</Accordion>
+
+<Accordion title="Protected paths (read-only override)">
+  - Agent data directory (contains databases and state)
+  - Identity files (`SOUL.md`, `IDENTITY.md`, `USER.md`)
+</Accordion>
+
+### Backend Detection
+
+Spacebot automatically detects the available sandbox backend at agent startup:
+
+- **Linux**: Checks for `bwrap` (bubblewrap) in PATH. Also probes for `/proc` mount support.
+- **macOS**: Checks for `/usr/bin/sandbox-exec`.
+- **Other platforms**: No sandbox backend available.
+
+If `mode = "enabled"` but no backend is detected, Spacebot logs a warning and runs processes unsandboxed. You can disable the warning by setting `mode = "disabled"`.
+
+### Verification
+
+Check the agent logs at startup to confirm sandbox status:
+
+```
+[INFO] sandbox enabled: bubblewrap backend (proc_supported=true)
+```
+
+or
+
+```
+[INFO] sandbox enabled: macOS sandbox-exec backend
+```
+
+or
+
+```
+[WARN] sandbox mode is enabled but no backend available — processes will run unsandboxed
+```
+
+## Application-Level Protections
+
+Even when the sandbox is disabled, Spacebot enforces several application-level restrictions:
+
+### Workspace Isolation
+
+File tools (`read`, `write`, `list`) canonicalize all paths and reject anything outside the agent's workspace. Symlinks that escape the workspace are blocked.
+
+```bash
+# Blocked: attempts to write outside workspace
+write --path /etc/passwd --content "malicious"
+
+# Blocked: symlink that points outside workspace
+write --path ../../../etc/passwd --content "malicious"
+```
+
+### Identity File Protection
+
+Writes to identity files are blocked at the application level, even if the sandbox allows it:
+
+- `SOUL.md`
+- `IDENTITY.md`
+- `USER.md`
+
+Attempting to modify these files returns an error directing the LLM to the proper channel (manual editing by the user).
+
+### Secret Leak Detection
+
+A hook scans every tool argument before execution and every tool result after execution for secret patterns:
+
+<Accordion title="Detected patterns">
+  - API keys (prefixes like `sk-`, `Bearer `, etc.)
+  - OAuth tokens
+  - PEM private keys (`-----BEGIN PRIVATE KEY-----`)
+  - Base64-encoded secrets
+  - Hex-encoded secrets
+  - URL-encoded secrets
+</Accordion>
+
+Leaked secrets in arguments skip the tool call and return an error. Leaked secrets in output terminate the agent immediately with a security violation.
+
+### Library Injection Blocking
+
+The `exec` tool blocks dangerous environment variables that could hijack child process loading:
+
+- `LD_PRELOAD` (Linux)
+- `DYLD_INSERT_LIBRARIES` (macOS)
+- `NODE_OPTIONS` (Node.js)
+- `PYTHONPATH` (Python)
+
+Attempting to set these variables returns an error.
+
+### SSRF Protection
+
+The browser tool blocks requests to cloud metadata endpoints and private IP ranges:
+
+<Accordion title="Blocked destinations">
+  - Cloud metadata endpoints:
+    - `169.254.169.254` (AWS, Azure, GCP)
+    - `metadata.google.internal` (GCP)
+  - Private IP ranges:
+    - `10.0.0.0/8`
+    - `172.16.0.0/12`
+    - `192.168.0.0/16`
+  - Loopback and link-local:
+    - `127.0.0.0/8`
+    - `::1`
+    - `169.254.0.0/16`
+    - `fe80::/10`
+</Accordion>
+
+## OpenCode Permissions
+
+When using OpenCode workers, you control which tools the OpenCode agent can use via permission modes. These settings are passed to OpenCode's config system and enforced by OpenCode itself.
+
+```toml
+[defaults.opencode.permissions]
+edit = "allow"    # or "reject", "ask"
+bash = "allow"    # or "reject", "ask"
+webfetch = "allow"  # or "reject", "ask"
+```
+
+<ParamField path="defaults.opencode.permissions.edit" type="string" default="allow">
+  Permission mode for OpenCode file edit operations:
+  - `allow` — Permit all file edits without prompting
+  - `reject` — Block all file edits (return error to LLM)
+  - `ask` — Prompt for approval (headless mode rejects)
+</ParamField>
+
+<ParamField path="defaults.opencode.permissions.bash" type="string" default="allow">
+  Permission mode for OpenCode shell commands:
+  - `allow` — Permit all shell commands without prompting
+  - `reject` — Block all shell commands (return error to LLM)
+  - `ask` — Prompt for approval (headless mode rejects)
+</ParamField>
+
+<ParamField path="defaults.opencode.permissions.webfetch" type="string" default="allow">
+  Permission mode for OpenCode web requests:
+  - `allow` — Permit all web requests without prompting
+  - `reject` — Block all web requests (return error to LLM)
+  - `ask` — Prompt for approval (headless mode rejects)
+</ParamField>
+
+### Headless Operation
+
+Spacebot runs OpenCode in headless mode (no interactive TUI). When a permission is set to `ask`, OpenCode will reject the action because there's no interactive user to prompt. Use `allow` or `reject` for headless operation.
+
+## Messaging Permissions
+
+Messaging adapters support per-platform permission filters that control which guilds, workspaces, channels, and users can interact with the bot. These are derived from your `bindings` configuration and applied at message ingress.
+
+### Discord Permissions
+
+```toml
+[messaging.discord]
+token = "env:DISCORD_BOT_TOKEN"
+dm_allowed_users = ["123456789", "987654321"]
+allow_bot_messages = false
+
+[[bindings]]
+agent_id = "my-agent"
+channel = "discord"
+guild_id = "111222333"  # only this guild
+channel_ids = ["444555666", "777888999"]  # only these channels
+require_mention = true  # require @mention in guilds
+dm_allowed_users = ["123456789"]  # additional DM users for this binding
+```
+
+<Accordion title="Discord permission filters">
+  - **Guild filter**: If any binding specifies `guild_id`, only messages from those guilds are processed.
+  - **Channel filter**: If a binding specifies `channel_ids`, only messages from those channels (or threads parented to those channels) are processed.
+  - **DM allowed users**: Union of `messaging.discord.dm_allowed_users` and all `bindings[].dm_allowed_users` for Discord bindings.
+  - **Mention requirement**: When `require_mention = true`, guild messages must @mention the bot or reply to a bot message.
+  - **Bot messages**: `allow_bot_messages = true` processes messages from other bots (self-messages always ignored).
+</Accordion>
+
+### Slack Permissions
+
+```toml
+[messaging.slack]
+bot_token = "env:SLACK_BOT_TOKEN"
+app_token = "env:SLACK_APP_TOKEN"
+dm_allowed_users = ["U12345678"]
+
+[[bindings]]
+agent_id = "my-agent"
+channel = "slack"
+workspace_id = "T12345678"  # only this workspace
+channel_ids = ["C87654321"]  # only this channel
+```
+
+<Accordion title="Slack permission filters">
+  - **Workspace filter**: If any binding specifies `workspace_id`, only messages from those workspaces are processed.
+  - **Channel filter**: If a binding specifies `channel_ids`, only messages from those channels are processed.
+  - **DM allowed users**: Union of `messaging.slack.dm_allowed_users` and all `bindings[].dm_allowed_users` for Slack bindings.
+</Accordion>
+
+### Hot-Reloadable Permissions
+
+Messaging permission filters are hot-reloadable. When you update `config.toml` and the file watcher detects the change, Spacebot rebuilds the permission filters and swaps them in without restarting the messaging adapters. No downtime, no reconnection.
+
+This applies to:
+- Discord guild/channel filters and DM allowed users
+- Slack workspace/channel filters and DM allowed users
+- Bindings (routing changes take effect immediately)
+
+## Security Best Practices
+
+<Accordion title="Always use sandbox mode">
+  Keep `sandbox.mode = "enabled"` (default) unless you have a specific reason to disable it. The sandbox is the primary defense against filesystem escape.
+</Accordion>
+
+<Accordion title="Minimize writable paths">
+  Only add paths to `writable_paths` if the agent genuinely needs to write there. Every writable path is an additional attack surface.
+</Accordion>
+
+<Accordion title="Use environment variables for secrets">
+  Never hardcode API keys, tokens, or passwords in `config.toml`. Use `env:VAR_NAME` references so secrets never touch the filesystem.
+</Accordion>
+
+<Accordion title="Restrict DM access">
+  Only add user IDs to `dm_allowed_users` for users you trust. DMs bypass guild/channel filters.
+</Accordion>
+
+<Accordion title="Require mentions in public channels">
+  Set `require_mention = true` for Discord guild bindings to prevent the bot from responding to every message.
+</Accordion>
+
+<Accordion title="Monitor worker logs">
+  Set `worker_log_mode = "all_combined"` or `"all_separate"` to log all worker activity for audit purposes. Review logs periodically for suspicious activity.
+</Accordion>
+
+<Accordion title="Disable browser.evaluate_enabled">
+  Keep `browser.evaluate_enabled = false` (default) unless you specifically need JavaScript evaluation. This blocks arbitrary code execution in the browser context.
+</Accordion>
+
+## Troubleshooting
+
+### Sandbox backend not detected
+
+**Symptom**: Warning at startup: `sandbox mode is enabled but no backend available`
+
+**Solution**:
+- **Linux**: Install bubblewrap: `sudo apt install bubblewrap` (Debian/Ubuntu) or `sudo dnf install bubblewrap` (Fedora)
+- **macOS**: `/usr/bin/sandbox-exec` should exist by default. Check that it's executable.
+- **Other platforms**: Set `sandbox.mode = "disabled"` to silence the warning.
+
+### Worker writes blocked outside workspace
+
+**Symptom**: File tool returns error: `path outside workspace`
+
+**Solution**: Add the target directory to `agents[].sandbox.writable_paths` if the agent legitimately needs to write there.
+
+### OpenCode actions blocked
+
+**Symptom**: OpenCode returns permission errors for `edit`, `bash`, or `webfetch` tools
+
+**Solution**: Check `defaults.opencode.permissions` (or per-agent overrides). Change `reject` or `ask` to `allow` for the relevant tool.
+
+### Discord messages ignored
+
+**Symptom**: Bot doesn't respond to messages in a guild/channel
+
+**Solution**:
+1. Verify `guild_id` matches the Discord guild ID (right-click guild → Copy ID with developer mode enabled)
+2. If using `channel_ids`, verify the channel ID is in the list
+3. If `require_mention = true`, verify messages @mention the bot or reply to a bot message
+4. Check that the binding's `agent_id` matches an existing agent
+
+### Slack messages ignored
+
+**Symptom**: Bot doesn't respond to messages in a workspace/channel
+
+**Solution**:
+1. Verify `workspace_id` matches the Slack team ID
+2. If using `channel_ids`, verify the channel ID is in the list
+3. Check that the bot is invited to the channel (public channels) or workspace (private channels)
+4. Verify the binding's `agent_id` matches an existing agent

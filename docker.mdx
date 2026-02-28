@@ -1,0 +1,503 @@
+---
+title: Docker Deployment
+description: Run Spacebot in a container with slim or full image variants.
+---
+
+# Docker Deployment
+
+Run Spacebot in a container. Two image variants: `slim` (no browser) and `full` (includes Chromium for browser workers).
+
+---
+
+## Quick Start
+
+```bash
+docker run -d \
+  --name spacebot \
+  -e ANTHROPIC_API_KEY="sk-ant-..." \
+  -v spacebot-data:/data \
+  -p 19898:19898 \
+  ghcr.io/spacedriveapp/spacebot:slim
+```
+
+The web UI is available at `http://localhost:19898`.
+
+---
+
+## Image Variants
+
+### spacebot:slim
+
+Minimal runtime. Everything works except the browser tool.
+
+- **Base**: `debian:bookworm-slim`
+- **Size**: ~150MB
+- **Includes**: Spacebot binary, CA certs, SQLite libs, bubblewrap (process sandbox), embedded frontend
+
+### spacebot:full
+
+Includes Chromium for browser workers (headless Chrome automation via CDP).
+
+- **Base**: `debian:bookworm-slim` + Chromium
+- **Size**: ~800MB
+- **Includes**: everything in slim + Chromium + browser dependencies
+
+<Info>
+Use `slim` for most deployments. Only use `full` if you need the browser tool for web automation tasks.
+</Info>
+
+---
+
+## Data Volume
+
+All persistent data lives at `/data` inside the container. Mount a volume here.
+
+```
+/data/
+├── config.toml              # optional, can use env vars instead
+├── embedding_cache/         # FastEmbed model cache (~100MB, downloaded on first run)
+├── agents/
+│   └── main/
+│       ├── workspace/       # identity files (SOUL.md, IDENTITY.md, USER.md)
+│       ├── data/            # SQLite, LanceDB, redb databases
+│       └── archives/        # compaction transcripts
+└── logs/                    # log files (daily rotation)
+```
+
+<Warning>
+On first launch with no config, Spacebot creates a default `main` agent with template identity files. The FastEmbed model (~100MB) downloads on first memory operation — subsequent starts use the cache.
+</Warning>
+
+---
+
+## Configuration
+
+### Environment Variables
+
+The simplest approach. No config file needed.
+
+```bash
+docker run -d \
+  --name spacebot \
+  -e ANTHROPIC_API_KEY="sk-ant-..." \
+  -e DISCORD_BOT_TOKEN="..." \
+  -v spacebot-data:/data \
+  -p 19898:19898 \
+  ghcr.io/spacedriveapp/spacebot:slim
+```
+
+Available environment variables:
+
+| Variable                 | Description            |
+| ------------------------ | ---------------------- |
+| `ANTHROPIC_API_KEY`      | Anthropic API key      |
+| `OPENAI_API_KEY`         | OpenAI API key         |
+| `OPENROUTER_API_KEY`     | OpenRouter API key     |
+| `DISCORD_BOT_TOKEN`      | Discord bot token      |
+| `SLACK_BOT_TOKEN`        | Slack bot token        |
+| `SLACK_APP_TOKEN`        | Slack app token        |
+| `BRAVE_SEARCH_API_KEY`   | Brave Search API key   |
+| `SPACEBOT_CHANNEL_MODEL` | Override channel model |
+| `SPACEBOT_WORKER_MODEL`  | Override worker model  |
+
+### Config File
+
+Mount a config file into the volume for full control:
+
+```bash
+docker run -d \
+  --name spacebot \
+  -v spacebot-data:/data \
+  -v ./config.toml:/data/config.toml:ro \
+  -p 19898:19898 \
+  ghcr.io/spacedriveapp/spacebot:slim
+```
+
+Config values can reference environment variables with `env:VAR_NAME`:
+
+```toml
+[llm]
+anthropic_key = "env:ANTHROPIC_API_KEY"
+```
+
+<Info>
+The `docker-entrypoint.sh` script automatically generates a `config.toml` from environment variables when no config file exists. Once a `config.toml` is present on the volume, this generation is skipped entirely.
+</Info>
+
+---
+
+## Docker Compose
+
+<CodeGroup>
+
+```yaml Slim (Recommended)
+services:
+  spacebot:
+    image: ghcr.io/spacedriveapp/spacebot:slim
+    container_name: spacebot
+    restart: unless-stopped
+    ports:
+      - "19898:19898"
+    volumes:
+      - spacebot-data:/data
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Optional:
+      # - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+
+volumes:
+  spacebot-data:
+```
+
+```yaml Full (With Browser)
+services:
+  spacebot:
+    image: ghcr.io/spacedriveapp/spacebot:full
+    container_name: spacebot
+    restart: unless-stopped
+    ports:
+      - "19898:19898"
+    volumes:
+      - spacebot-data:/data
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    # Chromium needs these for headless operation
+    security_opt:
+      - seccomp=unconfined
+    shm_size: 1gb
+
+volumes:
+  spacebot-data:
+```
+
+```yaml With Discord
+services:
+  spacebot:
+    image: ghcr.io/spacedriveapp/spacebot:slim
+    container_name: spacebot
+    restart: unless-stopped
+    ports:
+      - "19898:19898"
+    volumes:
+      - spacebot-data:/data
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - DISCORD_GUILD_ID=123456789
+      # Optional: restrict to specific channels
+      # - DISCORD_CHANNEL_IDS=111111111,222222222
+      # Optional: allow DMs from specific users
+      # - DISCORD_DM_ALLOWED_USERS=333333333,444444444
+
+volumes:
+  spacebot-data:
+```
+
+```yaml Production (One-Click Updates)
+services:
+  spacebot:
+    image: ghcr.io/spacedriveapp/spacebot:slim
+    container_name: spacebot
+    restart: unless-stopped
+    ports:
+      - "19898:19898"
+    volumes:
+      - spacebot-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+
+volumes:
+  spacebot-data:
+```
+
+</CodeGroup>
+
+<Note>
+The `shm_size` and `seccomp` settings are needed for Chromium to run properly in a container.
+</Note>
+
+---
+
+## Building the Image
+
+From the spacebot repo root:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/spacedriveapp/spacebot.git
+    cd spacebot
+    ```
+  </Step>
+  
+  <Step title="Build the image">
+    ```bash
+    # Slim (no browser)
+    docker build --target slim -t spacebot:slim .
+    
+    # Full (with Chromium)
+    docker build --target full -t spacebot:full .
+    ```
+  </Step>
+</Steps>
+
+The multi-stage Dockerfile:
+
+1. **Builder stage** — Rust toolchain + Bun. Compiles the React frontend, then builds the Rust binary with the frontend embedded.
+2. **Slim stage** — Minimal Debian runtime with the compiled binary.
+3. **Full stage** — Slim + Chromium and its dependencies.
+
+<Info>
+Build time is ~5-10 minutes on first build (downloading and compiling Rust dependencies). Subsequent builds use the cargo cache.
+</Info>
+
+---
+
+## Ports
+
+| Port  | Service                                 |
+| ----- | --------------------------------------- |
+| 19898 | HTTP API + Web UI                       |
+| 18789 | Webhook receiver (if enabled in config) |
+
+<Note>
+The API server binds to `0.0.0.0` inside the container (overriding the default `127.0.0.1` bind). The webhook port is only needed if you enable the webhook messaging adapter.
+</Note>
+
+---
+
+## Health Check
+
+The API server responds to `GET /api/health`. Use this for container health checks:
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:19898/api/health"]
+  interval: 30s
+  timeout: 5s
+  retries: 3
+```
+
+---
+
+## Container Behavior
+
+- Spacebot runs in **foreground mode** (`--foreground`) inside the container. No daemonization.
+- Logs go to stdout/stderr. Use `docker logs` to view them.
+- Graceful shutdown on `SIGTERM` (what `docker stop` sends). Drains active channels, closes database connections.
+- The PID file and Unix socket (used in daemon mode) are not created.
+
+---
+
+## Updates
+
+Spacebot checks for new releases on startup and every hour. When a new version is available, a banner appears in the web UI.
+
+You can also open **Settings → Updates** for update status, one-click apply controls (Docker), and manual command snippets.
+
+<Info>
+`latest` is supported and continues to receive updates (it tracks the rolling `full` image). Use explicit version tags only when you want controlled rollouts.
+</Info>
+
+### Manual Update
+
+<CodeGroup>
+
+```bash Docker Compose
+docker compose pull spacebot
+docker compose up -d --force-recreate spacebot
+```
+
+```bash Docker CLI
+docker pull ghcr.io/spacedriveapp/spacebot:latest
+docker stop spacebot && docker rm spacebot
+# re-run your original docker run command with the new image tag
+```
+
+</CodeGroup>
+
+### One-Click Update
+
+Mount the Docker socket to enable updating directly from the web UI:
+
+```yaml
+services:
+  spacebot:
+    image: ghcr.io/spacedriveapp/spacebot:slim
+    container_name: spacebot
+    restart: unless-stopped
+    ports:
+      - "19898:19898"
+    volumes:
+      - spacebot-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+```
+
+<Warning>
+When the socket is mounted, the update banner shows an **Update now** button that pulls the new image and recreates the container automatically. Your `/data` volume is preserved across updates.
+</Warning>
+
+Without the socket mount, the banner still notifies you of new versions but you'll need to update manually.
+
+<Note>
+One-click updates are intended for containers running Spacebot release tags. If you're running a custom/self-built image, update by rebuilding your image and recreating the container.
+</Note>
+
+### Update API
+
+You can also check for and trigger updates programmatically:
+
+```bash
+# Check for updates
+curl http://localhost:19898/api/update/check
+
+# Force a fresh check
+curl -X POST http://localhost:19898/api/update/check
+
+# Apply update (requires Docker socket)
+curl -X POST http://localhost:19898/api/update/apply
+```
+
+---
+
+## CI / Releases
+
+Images are built and pushed to `ghcr.io/spacedriveapp/spacebot` via GitHub Actions (`.github/workflows/release.yml`).
+
+**Triggers:**
+
+- Push a `v*` tag (e.g. `git tag v0.1.0 && git push --tags`)
+- Manual dispatch from the Actions tab
+
+**Tags pushed per release:**
+
+| Tag           | Description              |
+| ------------- | ------------------------ |
+| `v0.1.0-slim` | Versioned slim           |
+| `v0.1.0-full` | Versioned full           |
+| `slim`        | Rolling slim             |
+| `full`        | Rolling full             |
+| `latest`      | Rolling (points to full) |
+
+---
+
+## Example: Discord Bot Deployment
+
+<Steps>
+  <Step title="Create a Discord bot">
+    1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+    2. Create a new application
+    3. Go to the Bot tab and create a bot
+    4. Copy the bot token
+    5. Enable **Message Content Intent** under Privileged Gateway Intents
+  </Step>
+  
+  <Step title="Invite the bot to your server">
+    Go to OAuth2 → URL Generator:
+    - Scopes: `bot`, `applications.commands`
+    - Bot Permissions: `Send Messages`, `Read Message History`, `Add Reactions`, `Embed Links`
+    
+    Copy the generated URL and open it to invite the bot to your server.
+  </Step>
+  
+  <Step title="Deploy with Docker Compose">
+    Create `docker-compose.yml`:
+    
+    ```yaml
+    services:
+      spacebot:
+        image: ghcr.io/spacedriveapp/spacebot:slim
+        container_name: spacebot
+        restart: unless-stopped
+        ports:
+          - "19898:19898"
+        volumes:
+          - spacebot-data:/data
+        environment:
+          - ANTHROPIC_API_KEY=sk-ant-your-key-here
+          - DISCORD_BOT_TOKEN=your-discord-token-here
+          - DISCORD_GUILD_ID=your-guild-id-here
+    
+    volumes:
+      spacebot-data:
+    ```
+    
+    Start the container:
+    
+    ```bash
+    docker compose up -d
+    ```
+  </Step>
+  
+  <Step title="Send your first message">
+    In your Discord server, send a message mentioning the bot:
+    
+    ```
+    @Spacebot hello!
+    ```
+    
+    The bot will respond in the same channel.
+  </Step>
+</Steps>
+
+---
+
+## Troubleshooting
+
+### Container won't start
+
+Check the logs:
+
+```bash
+docker logs spacebot
+```
+
+Common issues:
+- Missing API key environment variable
+- Invalid config.toml syntax
+- Port 19898 already in use
+
+### Browser tool not working
+
+Make sure you're using the `full` image variant:
+
+```bash
+docker pull ghcr.io/spacedriveapp/spacebot:full
+```
+
+The `slim` image does not include Chromium.
+
+### Web UI shows empty page
+
+The frontend is embedded in the binary during build. If you built the image without the web UI dependencies, you'll see an empty page. Pull the official image:
+
+```bash
+docker pull ghcr.io/spacedriveapp/spacebot:latest
+```
+
+### Memory usage growing over time
+
+Spacebot uses LanceDB for vector storage, which can grow over time. You can configure memory decay and pruning in `config.toml`. See the [Memory System](/core/memory) documentation.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration/config">
+    Full config.toml reference with all available options
+  </Card>
+  <Card title="Discord Setup" icon="discord" href="/messaging/discord-setup">
+    Detailed Discord bot setup guide
+  </Card>
+  <Card title="Model Routing" icon="route" href="/core/routing">
+    Configure multi-tier model routing with fallback chains
+  </Card>
+  <Card title="Memory System" icon="brain" href="/core/memory">
+    Structured knowledge graph with typed memories and associations
+  </Card>
+</CardGroup>

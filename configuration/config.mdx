@@ -1,0 +1,1172 @@
+---
+title: 'Configuration Reference'
+description: 'Complete config.toml structure and options for Spacebot'
+---
+
+# Configuration Reference
+
+Your `config.toml` file defines LLM providers, agent settings, messaging platform credentials, and bindings that route conversations to specific agents. Every section supports environment variable references via `env:VAR_NAME`.
+
+## File Location
+
+Spacebot searches for `config.toml` in:
+
+1. Path specified by `--config` flag
+2. Current working directory
+3. `~/.spacebot/config.toml`
+4. `$SPACEBOT_DIR/config.toml` (if `SPACEBOT_DIR` is set)
+
+You can also use `SPACEBOT_CONFIG_PATH` environment variable to specify the config path.
+
+## LLM Providers
+
+Configure API keys for LLM providers. All keys are optional — configure only the providers you plan to use.
+
+```toml
+[llm]
+anthropic_key = "env:ANTHROPIC_API_KEY"
+openai_key = "env:OPENAI_API_KEY"
+openrouter_key = "env:OPENROUTER_API_KEY"
+kilo_key = "env:KILO_API_KEY"
+zhipu_key = "env:ZHIPU_API_KEY"  # Z.ai (GLM)
+groq_key = "env:GROQ_API_KEY"
+together_key = "env:TOGETHER_API_KEY"
+fireworks_key = "env:FIREWORKS_API_KEY"
+deepseek_key = "env:DEEPSEEK_API_KEY"
+xai_key = "env:XAI_API_KEY"
+mistral_key = "env:MISTRAL_API_KEY"
+gemini_key = "env:GEMINI_API_KEY"
+ollama_base_url = "http://localhost:11434"
+opencode_zen_key = "env:OPENCODE_ZEN_KEY"
+opencode_go_key = "env:OPENCODE_GO_KEY"
+nvidia_key = "env:NVIDIA_API_KEY"
+minimax_key = "env:MINIMAX_API_KEY"
+minimax_cn_key = "env:MINIMAX_CN_API_KEY"
+moonshot_key = "env:MOONSHOT_API_KEY"  # Kimi
+zai_coding_plan_key = "env:ZAI_CODING_PLAN_KEY"
+```
+
+<ParamField path="anthropic_key" type="string">
+  Anthropic API key for Claude models. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="openai_key" type="string">
+  OpenAI API key for GPT models. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="openrouter_key" type="string">
+  OpenRouter API key for multi-provider access. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="kilo_key" type="string">
+  Kilo Gateway API key. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="zhipu_key" type="string">
+  Z.ai (GLM) API key for GLM models. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="groq_key" type="string">
+  Groq API key for fast inference. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="together_key" type="string">
+  Together AI API key. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="fireworks_key" type="string">
+  Fireworks AI API key. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="deepseek_key" type="string">
+  DeepSeek API key. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="xai_key" type="string">
+  xAI (Grok) API key. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="mistral_key" type="string">
+  Mistral AI API key. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="gemini_key" type="string">
+  Google Gemini API key. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="ollama_key" type="string">
+  Optional API key for Ollama instances that require authentication. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="ollama_base_url" type="string">
+  Base URL for local Ollama instance. Defaults to `http://localhost:11434`.
+</ParamField>
+
+<ParamField path="opencode_zen_key" type="string">
+  OpenCode Zen API key. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="opencode_go_key" type="string">
+  OpenCode Go API key. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="nvidia_key" type="string">
+  NVIDIA API key for their model catalog. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="minimax_key" type="string">
+  MiniMax API key (international endpoint). Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="minimax_cn_key" type="string">
+  MiniMax API key (China endpoint). Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="moonshot_key" type="string">
+  Moonshot AI (Kimi) API key. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="zai_coding_plan_key" type="string">
+  Z.ai Coding Plan API key for specialized coding models. Supports `env:VAR_NAME` references.
+</ParamField>
+
+### Custom Providers
+
+Add any OpenAI-compatible or Anthropic-compatible endpoint:
+
+```toml
+[llm.provider.my-provider]
+api_type = "openai_completions"  # or "anthropic", "gemini", "kilo_gateway"
+base_url = "https://my-llm-host.example.com"
+api_key = "env:MY_PROVIDER_KEY"
+name = "My Custom Provider"  # optional display name
+```
+
+<ParamField path="llm.provider.<name>.api_type" type="string" required>
+  API compatibility mode. Options:
+  - `openai_completions` — OpenAI `/v1/chat/completions` API
+  - `openai_chat_completions` — OpenAI-compatible `/chat/completions` (no `/v1/` prefix)
+  - `kilo_gateway` — Kilo Gateway API with required headers
+  - `openai_responses` — OpenAI `/v1/responses` API
+  - `anthropic` — Anthropic Messages API
+  - `gemini` — Google Gemini API
+</ParamField>
+
+<ParamField path="llm.provider.<name>.base_url" type="string" required>
+  Base URL for the API endpoint (without trailing `/v1/chat/completions`).
+</ParamField>
+
+<ParamField path="llm.provider.<name>.api_key" type="string" required>
+  API key for authentication. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="llm.provider.<name>.name" type="string">
+  Optional display name for the provider.
+</ParamField>
+
+## Defaults
+
+Defaults are inherited by all agents unless overridden in the agent-specific configuration.
+
+### Routing
+
+Model routing determines which LLM model handles each process type and task type.
+
+```toml
+[defaults.routing]
+channel = "anthropic/claude-sonnet-4"
+worker = "anthropic/claude-haiku-4.5"
+branch = "anthropic/claude-sonnet-4"
+compactor = "anthropic/claude-haiku-4.5"
+cortex = "anthropic/claude-sonnet-4"
+
+[defaults.routing.task_overrides]
+coding = "anthropic/claude-sonnet-4"
+summarization = "anthropic/claude-haiku-4.5"
+memory_recall = "anthropic/claude-haiku-4.5"
+
+[defaults.routing.prompt_routing]
+enabled = true
+process_types = ["channel", "branch"]
+
+[defaults.routing.fallbacks]
+"anthropic/claude-sonnet-4" = ["anthropic/claude-haiku-4.5"]
+```
+
+<ParamField path="defaults.routing.channel" type="string">
+  Default model for channel processes (user-facing conversations). Example: `anthropic/claude-sonnet-4`
+</ParamField>
+
+<ParamField path="defaults.routing.worker" type="string">
+  Default model for worker processes (task execution). Example: `anthropic/claude-haiku-4.5`
+</ParamField>
+
+<ParamField path="defaults.routing.branch" type="string">
+  Default model for branch processes (thinking/memory recall). Example: `anthropic/claude-sonnet-4`
+</ParamField>
+
+<ParamField path="defaults.routing.compactor" type="string">
+  Default model for compaction workers (context summarization). Example: `anthropic/claude-haiku-4.5`
+</ParamField>
+
+<ParamField path="defaults.routing.cortex" type="string">
+  Default model for cortex processes (memory bulletin, system observation). Example: `anthropic/claude-sonnet-4`
+</ParamField>
+
+<ParamField path="defaults.routing.task_overrides" type="object">
+  Map task types to specific models. Supported task types:
+  - `coding` — code writing and refactoring
+  - `summarization` — context compaction
+  - `memory_recall` — memory search and curation
+  - `memory_save` — memory extraction and storage
+  - `browser` — web browsing tasks
+</ParamField>
+
+<ParamField path="defaults.routing.prompt_routing.enabled" type="boolean" default="false">
+  Enable prompt complexity scoring to downgrade simple requests to cheaper models.
+</ParamField>
+
+<ParamField path="defaults.routing.prompt_routing.process_types" type="array">
+  Process types that use prompt complexity scoring. Example: `["channel", "branch"]`
+</ParamField>
+
+<ParamField path="defaults.routing.fallbacks" type="object">
+  Fallback chains for model failures (429, 502). Map primary model to array of fallback models.
+</ParamField>
+
+### Concurrency
+
+```toml
+[defaults]
+max_concurrent_branches = 5
+max_concurrent_workers = 5
+max_turns = 5
+branch_max_turns = 50
+context_window = 128000
+```
+
+<ParamField path="defaults.max_concurrent_branches" type="integer" default="5">
+  Maximum number of branches that can run simultaneously per channel.
+</ParamField>
+
+<ParamField path="defaults.max_concurrent_workers" type="integer" default="5">
+  Maximum number of workers that can run simultaneously per agent.
+</ParamField>
+
+<ParamField path="defaults.max_turns" type="integer" default="5">
+  Maximum LLM turns for channel processes before requiring user input.
+</ParamField>
+
+<ParamField path="defaults.branch_max_turns" type="integer" default="50">
+  Maximum LLM turns for branch and worker processes.
+</ParamField>
+
+<ParamField path="defaults.context_window" type="integer" default="128000">
+  Context window size in tokens. Used for compaction threshold calculations.
+</ParamField>
+
+### Compaction
+
+```toml
+[defaults.compaction]
+background_threshold = 0.80
+aggressive_threshold = 0.85
+emergency_threshold = 0.95
+```
+
+<ParamField path="defaults.compaction.background_threshold" type="float" default="0.80">
+  Context utilization percentage that triggers background compaction (summarize oldest 30%).
+</ParamField>
+
+<ParamField path="defaults.compaction.aggressive_threshold" type="float" default="0.85">
+  Context utilization percentage that triggers aggressive compaction (summarize oldest 50%).
+</ParamField>
+
+<ParamField path="defaults.compaction.emergency_threshold" type="float" default="0.95">
+  Context utilization percentage that triggers emergency truncation (hard drop, no LLM).
+</ParamField>
+
+### Memory Persistence
+
+```toml
+[defaults.memory_persistence]
+enabled = true
+message_interval = 50
+```
+
+<ParamField path="defaults.memory_persistence.enabled" type="boolean" default="true">
+  Enable automatic memory persistence branches every N user messages.
+</ParamField>
+
+<ParamField path="defaults.memory_persistence.message_interval" type="integer" default="50">
+  Number of user messages between automatic memory persistence branches.
+</ParamField>
+
+### Message Coalescing
+
+```toml
+[defaults.coalesce]
+enabled = true
+debounce_ms = 1500
+max_wait_ms = 5000
+min_messages = 2
+multi_user_only = true
+```
+
+<ParamField path="defaults.coalesce.enabled" type="boolean" default="true">
+  Enable message coalescing for rapid-fire messages.
+</ParamField>
+
+<ParamField path="defaults.coalesce.debounce_ms" type="integer" default="1500">
+  Initial debounce window after first message (milliseconds).
+</ParamField>
+
+<ParamField path="defaults.coalesce.max_wait_ms" type="integer" default="5000">
+  Maximum time to wait before flushing regardless (milliseconds).
+</ParamField>
+
+<ParamField path="defaults.coalesce.min_messages" type="integer" default="2">
+  Minimum messages to trigger coalesce mode (1 = always debounce, 2 = only when burst detected).
+</ParamField>
+
+<ParamField path="defaults.coalesce.multi_user_only" type="boolean" default="true">
+  Apply only to multi-user conversations (skip for DMs).
+</ParamField>
+
+### Memory Ingestion
+
+```toml
+[defaults.ingestion]
+enabled = true
+poll_interval_secs = 30
+chunk_size = 4000
+```
+
+<ParamField path="defaults.ingestion.enabled" type="boolean" default="true">
+  Enable file-based memory ingestion from agent workspace `ingest/` directory.
+</ParamField>
+
+<ParamField path="defaults.ingestion.poll_interval_secs" type="integer" default="30">
+  How often to scan the ingest directory for new files (seconds).
+</ParamField>
+
+<ParamField path="defaults.ingestion.chunk_size" type="integer" default="4000">
+  Target chunk size in characters when splitting ingested files.
+</ParamField>
+
+### Cortex
+
+```toml
+[defaults.cortex]
+tick_interval_secs = 30
+worker_timeout_secs = 300
+branch_timeout_secs = 60
+circuit_breaker_threshold = 3
+bulletin_interval_secs = 3600
+bulletin_max_words = 1500
+bulletin_max_turns = 15
+association_interval_secs = 300
+association_similarity_threshold = 0.85
+association_updates_threshold = 0.95
+association_max_per_pass = 100
+```
+
+<ParamField path="defaults.cortex.tick_interval_secs" type="integer" default="30">
+  Interval between cortex observation ticks (seconds).
+</ParamField>
+
+<ParamField path="defaults.cortex.worker_timeout_secs" type="integer" default="300">
+  Timeout for worker processes before cortex kills them (seconds).
+</ParamField>
+
+<ParamField path="defaults.cortex.branch_timeout_secs" type="integer" default="60">
+  Timeout for branch processes before cortex kills them (seconds).
+</ParamField>
+
+<ParamField path="defaults.cortex.circuit_breaker_threshold" type="integer" default="3">
+  Number of consecutive failures before auto-disabling recurring tasks.
+</ParamField>
+
+<ParamField path="defaults.cortex.bulletin_interval_secs" type="integer" default="3600">
+  Interval between memory bulletin refreshes (seconds).
+</ParamField>
+
+<ParamField path="defaults.cortex.bulletin_max_words" type="integer" default="1500">
+  Target word count for the memory bulletin.
+</ParamField>
+
+<ParamField path="defaults.cortex.bulletin_max_turns" type="integer" default="15">
+  Maximum LLM turns for bulletin generation.
+</ParamField>
+
+<ParamField path="defaults.cortex.association_interval_secs" type="integer" default="300">
+  Interval between memory association passes (seconds).
+</ParamField>
+
+<ParamField path="defaults.cortex.association_similarity_threshold" type="float" default="0.85">
+  Minimum cosine similarity to create a RelatedTo edge between memories.
+</ParamField>
+
+<ParamField path="defaults.cortex.association_updates_threshold" type="float" default="0.95">
+  Minimum cosine similarity to create an Updates edge (near-duplicate).
+</ParamField>
+
+<ParamField path="defaults.cortex.association_max_per_pass" type="integer" default="100">
+  Maximum associations to create per pass (rate limit).
+</ParamField>
+
+### Warmup
+
+```toml
+[defaults.warmup]
+enabled = true
+eager_embedding_load = true
+refresh_secs = 900
+startup_delay_secs = 5
+```
+
+<ParamField path="defaults.warmup.enabled" type="boolean" default="true">
+  Enable background warmup passes.
+</ParamField>
+
+<ParamField path="defaults.warmup.eager_embedding_load" type="boolean" default="true">
+  Force-load the embedding model before first recall/write workloads.
+</ParamField>
+
+<ParamField path="defaults.warmup.refresh_secs" type="integer" default="900">
+  Interval between warmup refresh passes (seconds).
+</ParamField>
+
+<ParamField path="defaults.warmup.startup_delay_secs" type="integer" default="5">
+  Startup delay before the first warmup pass (seconds).
+</ParamField>
+
+### Browser
+
+```toml
+[defaults.browser]
+enabled = true
+headless = true
+evaluate_enabled = false
+executable_path = "/path/to/chrome"  # optional
+screenshot_dir = "/path/to/screenshots"  # optional
+```
+
+<ParamField path="defaults.browser.enabled" type="boolean" default="true">
+  Enable browser tools for workers.
+</ParamField>
+
+<ParamField path="defaults.browser.headless" type="boolean" default="true">
+  Run Chrome in headless mode.
+</ParamField>
+
+<ParamField path="defaults.browser.evaluate_enabled" type="boolean" default="false">
+  Allow JavaScript evaluation via the browser tool (security risk).
+</ParamField>
+
+<ParamField path="defaults.browser.executable_path" type="string">
+  Custom Chrome/Chromium executable path. If not set, uses system Chrome.
+</ParamField>
+
+<ParamField path="defaults.browser.screenshot_dir" type="string">
+  Directory for storing screenshots. Defaults to `{data_dir}/screenshots`.
+</ParamField>
+
+### OpenCode
+
+```toml
+[defaults.opencode]
+enabled = false
+path = "opencode"  # or "env:OPENCODE_PATH"
+max_servers = 5
+server_startup_timeout_secs = 30
+max_restart_retries = 5
+
+[defaults.opencode.permissions]
+edit = "allow"  # or "reject", "ask"
+bash = "allow"
+webfetch = "allow"
+```
+
+<ParamField path="defaults.opencode.enabled" type="boolean" default="false">
+  Enable OpenCode workers for coding tasks.
+</ParamField>
+
+<ParamField path="defaults.opencode.path" type="string" default="opencode">
+  Path to the OpenCode binary. Supports `env:VAR_NAME` references. Defaults to `opencode` on PATH.
+</ParamField>
+
+<ParamField path="defaults.opencode.max_servers" type="integer" default="5">
+  Maximum concurrent OpenCode server processes.
+</ParamField>
+
+<ParamField path="defaults.opencode.server_startup_timeout_secs" type="integer" default="30">
+  Timeout in seconds waiting for a server to become healthy.
+</ParamField>
+
+<ParamField path="defaults.opencode.max_restart_retries" type="integer" default="5">
+  Maximum restart attempts before giving up on a server.
+</ParamField>
+
+<ParamField path="defaults.opencode.permissions.edit" type="string" default="allow">
+  Permission mode for OpenCode file edits: `allow`, `reject`, or `ask`.
+</ParamField>
+
+<ParamField path="defaults.opencode.permissions.bash" type="string" default="allow">
+  Permission mode for OpenCode shell commands: `allow`, `reject`, or `ask`.
+</ParamField>
+
+<ParamField path="defaults.opencode.permissions.webfetch" type="string" default="allow">
+  Permission mode for OpenCode web requests: `allow`, `reject`, or `ask`.
+</ParamField>
+
+### MCP Servers
+
+```toml
+[[defaults.mcp]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+enabled = true
+
+[[defaults.mcp]]
+name = "sentry"
+transport = "http"
+url = "https://mcp.sentry.io"
+headers = { Authorization = "Bearer ${SENTRY_TOKEN}" }
+enabled = true
+```
+
+<ParamField path="defaults.mcp[].name" type="string" required>
+  Unique name for this MCP server.
+</ParamField>
+
+<ParamField path="defaults.mcp[].transport" type="string" required>
+  Transport type: `stdio` (subprocess) or `http` (remote server).
+</ParamField>
+
+<ParamField path="defaults.mcp[].command" type="string">
+  Command to run for stdio transport. Example: `npx`
+</ParamField>
+
+<ParamField path="defaults.mcp[].args" type="array">
+  Command arguments for stdio transport. Example: `["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]`
+</ParamField>
+
+<ParamField path="defaults.mcp[].env" type="object">
+  Environment variables for stdio transport. Example: `{ API_KEY = "env:MY_KEY" }`
+</ParamField>
+
+<ParamField path="defaults.mcp[].url" type="string">
+  URL for http transport. Example: `https://mcp.sentry.io`
+</ParamField>
+
+<ParamField path="defaults.mcp[].headers" type="object">
+  HTTP headers for http transport. Example: `{ Authorization = "Bearer ${TOKEN}" }`
+</ParamField>
+
+<ParamField path="defaults.mcp[].enabled" type="boolean" default="true">
+  Enable or disable this MCP server.
+</ParamField>
+
+### Other Defaults
+
+```toml
+[defaults]
+brave_search_key = "env:BRAVE_SEARCH_API_KEY"
+cron_timezone = "America/Los_Angeles"
+user_timezone = "America/Los_Angeles"
+history_backfill_count = 50
+worker_log_mode = "errors_only"  # or "all_separate", "all_combined"
+```
+
+<ParamField path="defaults.brave_search_key" type="string">
+  Brave Search API key for web search tool. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="defaults.cron_timezone" type="string">
+  Default timezone for cron active hours evaluation. Example: `America/Los_Angeles`
+</ParamField>
+
+<ParamField path="defaults.user_timezone" type="string">
+  Default timezone for channel/worker temporal context. Example: `America/Los_Angeles`
+</ParamField>
+
+<ParamField path="defaults.history_backfill_count" type="integer" default="50">
+  Number of messages to fetch from the platform when a new channel is created.
+</ParamField>
+
+<ParamField path="defaults.worker_log_mode" type="string" default="errors_only">
+  Worker log mode:
+  - `errors_only` — only write logs on failure
+  - `all_separate` — write separate log file for each worker
+  - `all_combined` — write all workers to a single log file
+</ParamField>
+
+## Agents
+
+Define one or more agents. Each agent has its own workspace, databases, identity files, and messaging bindings.
+
+```toml
+[[agents]]
+id = "my-agent"
+default = false
+display_name = "My Agent"
+role = "handles tier 1 support"
+workspace = "/path/to/workspace"  # optional
+
+# Agent-specific overrides (all optional)
+max_concurrent_branches = 10
+max_concurrent_workers = 10
+brave_search_key = "env:AGENT_BRAVE_KEY"
+
+[agents.routing]
+channel = "anthropic/claude-opus-4"
+
+[agents.sandbox]
+mode = "enabled"  # or "disabled"
+writable_paths = ["/home/user/projects/myapp"]
+```
+
+<ParamField path="agents[].id" type="string" required>
+  Unique agent identifier. Used in bindings and API requests. Must be lowercase alphanumeric with hyphens.
+</ParamField>
+
+<ParamField path="agents[].default" type="boolean" default="false">
+  Mark this agent as the default for unbound conversations.
+</ParamField>
+
+<ParamField path="agents[].display_name" type="string">
+  Human-readable agent name shown in UI.
+</ParamField>
+
+<ParamField path="agents[].role" type="string">
+  Agent role description (e.g., "handles tier 1 support").
+</ParamField>
+
+<ParamField path="agents[].workspace" type="string">
+  Custom workspace path. Defaults to `{instance_dir}/agents/{id}/workspace`.
+</ParamField>
+
+All agent fields from `defaults` can be overridden per agent: `routing`, `max_concurrent_branches`, `max_concurrent_workers`, `max_turns`, `branch_max_turns`, `context_window`, `compaction`, `memory_persistence`, `coalesce`, `ingestion`, `cortex`, `warmup`, `browser`, `mcp`, `brave_search_key`, `cron_timezone`, `user_timezone`.
+
+<ParamField path="agents[].sandbox" type="object">
+  Sandbox configuration for process containment. See [Permissions](/configuration/permissions) for details.
+</ParamField>
+
+### Cron Jobs
+
+Define scheduled tasks per agent:
+
+```toml
+[[agents.cron]]
+id = "daily-summary"
+prompt = "Summarize today's activity"
+cron_expr = "0 17 * * *"  # 5 PM daily
+delivery_target = "discord:123456789"
+active_hours = [9, 17]  # 9 AM to 5 PM
+enabled = true
+timeout_secs = 120
+```
+
+<ParamField path="agents[].cron[].id" type="string" required>
+  Unique cron job identifier within this agent.
+</ParamField>
+
+<ParamField path="agents[].cron[].prompt" type="string" required>
+  Prompt sent to the agent when the job fires.
+</ParamField>
+
+<ParamField path="agents[].cron[].cron_expr" type="string">
+  Cron expression (5-field format). Example: `0 9 * * *` for 9 AM daily. Takes precedence over `interval_secs`.
+</ParamField>
+
+<ParamField path="agents[].cron[].interval_secs" type="integer">
+  Legacy interval in seconds. Used if `cron_expr` is not set.
+</ParamField>
+
+<ParamField path="agents[].cron[].delivery_target" type="string" required>
+  Delivery target in `adapter:target` format. Example: `discord:123456789`
+</ParamField>
+
+<ParamField path="agents[].cron[].active_hours" type="array">
+  Optional active hours window `[start_hour, end_hour]` in 24h format. Example: `[9, 17]` for 9 AM to 5 PM.
+</ParamField>
+
+<ParamField path="agents[].cron[].enabled" type="boolean" default="true">
+  Enable or disable this cron job.
+</ParamField>
+
+<ParamField path="agents[].cron[].run_once" type="boolean" default="false">
+  Run once and then disable.
+</ParamField>
+
+<ParamField path="agents[].cron[].timeout_secs" type="integer" default="120">
+  Maximum wall-clock seconds to wait for the job to complete.
+</ParamField>
+
+## Links and Groups
+
+Define visual topology for the agent graph UI:
+
+```toml
+[[links]]
+from = "agent-a"
+to = "agent-b"
+direction = "bidirectional"  # or "unidirectional"
+kind = "collaboration"
+
+[[groups]]
+name = "Support Team"
+agent_ids = ["agent-a", "agent-b"]
+color = "#FF6B6B"
+```
+
+<ParamField path="links[].from" type="string" required>
+  Source node (agent ID or human ID).
+</ParamField>
+
+<ParamField path="links[].to" type="string" required>
+  Target node (agent ID or human ID).
+</ParamField>
+
+<ParamField path="links[].direction" type="string" required>
+  Link direction: `bidirectional` or `unidirectional`.
+</ParamField>
+
+<ParamField path="links[].kind" type="string" required>
+  Link type (e.g., `collaboration`, `delegation`).
+</ParamField>
+
+<ParamField path="groups[].name" type="string" required>
+  Group name shown in topology UI.
+</ParamField>
+
+<ParamField path="groups[].agent_ids" type="array" required>
+  Array of agent IDs in this group.
+</ParamField>
+
+<ParamField path="groups[].color" type="string">
+  Optional color for the group in hex format. Example: `#FF6B6B`
+</ParamField>
+
+## Humans
+
+Define org-level humans for the topology graph:
+
+```toml
+[[humans]]
+id = "alice"
+display_name = "Alice Johnson"
+role = "Engineering Lead"
+bio = "Leads the platform team"
+```
+
+<ParamField path="humans[].id" type="string" required>
+  Unique human identifier.
+</ParamField>
+
+<ParamField path="humans[].display_name" type="string">
+  Human-readable name.
+</ParamField>
+
+<ParamField path="humans[].role" type="string">
+  Role or title.
+</ParamField>
+
+<ParamField path="humans[].bio" type="string">
+  Short biography or description.
+</ParamField>
+
+## Messaging
+
+Configure messaging platform credentials and adapters.
+
+### Discord
+
+```toml
+[messaging.discord]
+enabled = true
+token = "env:DISCORD_BOT_TOKEN"
+dm_allowed_users = ["123456789"]
+allow_bot_messages = false
+
+# Named instances for multiple bots
+[[messaging.discord.instances]]
+name = "ops"
+enabled = true
+token = "env:DISCORD_OPS_BOT_TOKEN"
+dm_allowed_users = ["987654321"]
+allow_bot_messages = false
+```
+
+<ParamField path="messaging.discord.enabled" type="boolean" default="true">
+  Enable the Discord adapter.
+</ParamField>
+
+<ParamField path="messaging.discord.token" type="string" required>
+  Discord bot token. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="messaging.discord.dm_allowed_users" type="array">
+  User IDs allowed to DM the bot. If empty, DMs are ignored entirely.
+</ParamField>
+
+<ParamField path="messaging.discord.allow_bot_messages" type="boolean" default="false">
+  Whether to process messages from other bots (self-messages are always ignored).
+</ParamField>
+
+<ParamField path="messaging.discord.instances" type="array">
+  Additional named Discord bot instances. Each has `name`, `enabled`, `token`, `dm_allowed_users`, and `allow_bot_messages`.
+</ParamField>
+
+### Slack
+
+```toml
+[messaging.slack]
+enabled = true
+bot_token = "env:SLACK_BOT_TOKEN"
+app_token = "env:SLACK_APP_TOKEN"
+dm_allowed_users = ["U12345678"]
+
+[[messaging.slack.commands]]
+command = "/ask"
+agent_id = "my-agent"
+description = "Ask the agent a question"
+
+# Named instances for multiple workspaces
+[[messaging.slack.instances]]
+name = "customer-workspace"
+enabled = true
+bot_token = "env:SLACK_CUSTOMER_BOT_TOKEN"
+app_token = "env:SLACK_CUSTOMER_APP_TOKEN"
+dm_allowed_users = ["U87654321"]
+```
+
+<ParamField path="messaging.slack.enabled" type="boolean" default="true">
+  Enable the Slack adapter.
+</ParamField>
+
+<ParamField path="messaging.slack.bot_token" type="string" required>
+  Slack bot token (starts with `xoxb-`). Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="messaging.slack.app_token" type="string" required>
+  Slack app token (starts with `xapp-`). Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="messaging.slack.dm_allowed_users" type="array">
+  User IDs allowed to DM the bot. If empty, DMs are ignored entirely.
+</ParamField>
+
+<ParamField path="messaging.slack.commands" type="array">
+  Slash command definitions. Each has `command` (e.g., `/ask`), `agent_id`, and optional `description`.
+</ParamField>
+
+<ParamField path="messaging.slack.instances" type="array">
+  Additional named Slack app instances. Each has `name`, `enabled`, `bot_token`, `app_token`, `dm_allowed_users`, and `commands`.
+</ParamField>
+
+### Telegram
+
+```toml
+[messaging.telegram]
+enabled = true
+token = "env:TELEGRAM_BOT_TOKEN"
+
+# Named instances
+[[messaging.telegram.instances]]
+name = "support"
+enabled = true
+token = "env:TELEGRAM_SUPPORT_BOT_TOKEN"
+```
+
+<ParamField path="messaging.telegram.enabled" type="boolean" default="true">
+  Enable the Telegram adapter.
+</ParamField>
+
+<ParamField path="messaging.telegram.token" type="string" required>
+  Telegram bot token from BotFather. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="messaging.telegram.instances" type="array">
+  Additional named Telegram bot instances. Each has `name`, `enabled`, and `token`.
+</ParamField>
+
+### Twitch
+
+```toml
+[messaging.twitch]
+enabled = true
+username = "env:TWITCH_USERNAME"
+oauth_token = "env:TWITCH_OAUTH_TOKEN"
+trigger_prefix = "!"
+
+# Named instances
+[[messaging.twitch.instances]]
+name = "gaming"
+enabled = true
+username = "env:TWITCH_GAMING_USERNAME"
+oauth_token = "env:TWITCH_GAMING_OAUTH_TOKEN"
+trigger_prefix = "@"
+```
+
+<ParamField path="messaging.twitch.enabled" type="boolean" default="true">
+  Enable the Twitch adapter.
+</ParamField>
+
+<ParamField path="messaging.twitch.username" type="string" required>
+  Twitch username for the bot. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="messaging.twitch.oauth_token" type="string" required>
+  Twitch OAuth token (starts with `oauth:`). Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="messaging.twitch.trigger_prefix" type="string" default="!">
+  Prefix that triggers bot responses in chat.
+</ParamField>
+
+<ParamField path="messaging.twitch.instances" type="array">
+  Additional named Twitch bot instances. Each has `name`, `enabled`, `username`, `oauth_token`, and `trigger_prefix`.
+</ParamField>
+
+### Email
+
+```toml
+[messaging.email]
+enabled = true
+imap_server = "imap.gmail.com"
+imap_port = 993
+smtp_server = "smtp.gmail.com"
+smtp_port = 587
+username = "env:EMAIL_USERNAME"
+password = "env:EMAIL_PASSWORD"
+```
+
+<ParamField path="messaging.email.enabled" type="boolean" default="true">
+  Enable the email adapter.
+</ParamField>
+
+<ParamField path="messaging.email.imap_server" type="string" required>
+  IMAP server hostname. Example: `imap.gmail.com`
+</ParamField>
+
+<ParamField path="messaging.email.imap_port" type="integer" default="993">
+  IMAP server port.
+</ParamField>
+
+<ParamField path="messaging.email.smtp_server" type="string" required>
+  SMTP server hostname. Example: `smtp.gmail.com`
+</ParamField>
+
+<ParamField path="messaging.email.smtp_port" type="integer" default="587">
+  SMTP server port.
+</ParamField>
+
+<ParamField path="messaging.email.username" type="string" required>
+  Email account username. Supports `env:VAR_NAME` references.
+</ParamField>
+
+<ParamField path="messaging.email.password" type="string" required>
+  Email account password or app-specific password. Supports `env:VAR_NAME` references.
+</ParamField>
+
+### Webhook
+
+```toml
+[messaging.webhook]
+enabled = true
+port = 19899
+bind = "127.0.0.1"
+```
+
+<ParamField path="messaging.webhook.enabled" type="boolean" default="true">
+  Enable the webhook receiver.
+</ParamField>
+
+<ParamField path="messaging.webhook.port" type="integer" default="19899">
+  Port to bind the webhook HTTP server on.
+</ParamField>
+
+<ParamField path="messaging.webhook.bind" type="string" default="127.0.0.1">
+  Address to bind the webhook HTTP server on.
+</ParamField>
+
+## Bindings
+
+Bindings route messaging platform conversations to specific agents.
+
+```toml
+[[bindings]]
+agent_id = "my-agent"
+channel = "discord"
+adapter = "ops"  # optional, targets named instance
+guild_id = "123456789"
+channel_ids = ["987654321", "111222333"]  # optional
+require_mention = true
+dm_allowed_users = ["444555666"]  # optional
+
+[[bindings]]
+agent_id = "support-agent"
+channel = "slack"
+workspace_id = "T12345678"
+channel_ids = ["C87654321"]
+
+[[bindings]]
+agent_id = "telegram-agent"
+channel = "telegram"
+chat_id = "-1001234567890"
+```
+
+<ParamField path="bindings[].agent_id" type="string" required>
+  Agent ID that handles messages matching this binding.
+</ParamField>
+
+<ParamField path="bindings[].channel" type="string" required>
+  Messaging platform: `discord`, `slack`, `telegram`, `twitch`, `email`, or `webchat`.
+</ParamField>
+
+<ParamField path="bindings[].adapter" type="string">
+  Optional named adapter instance. If not set, uses the default adapter for this platform.
+</ParamField>
+
+<ParamField path="bindings[].guild_id" type="string">
+  Discord guild (server) ID. Required for Discord guild bindings.
+</ParamField>
+
+<ParamField path="bindings[].workspace_id" type="string">
+  Slack workspace (team) ID. Required for Slack bindings.
+</ParamField>
+
+<ParamField path="bindings[].chat_id" type="string">
+  Telegram chat ID. Required for Telegram bindings.
+</ParamField>
+
+<ParamField path="bindings[].channel_ids" type="array">
+  Channel IDs this binding applies to. If empty, all channels in the guild/workspace are allowed.
+</ParamField>
+
+<ParamField path="bindings[].require_mention" type="boolean" default="false">
+  Require explicit @mention (or reply-to-bot) for inbound messages. Discord only.
+</ParamField>
+
+<ParamField path="bindings[].dm_allowed_users" type="array">
+  User IDs allowed to DM the bot through this binding.
+</ParamField>
+
+## API
+
+```toml
+[api]
+enabled = true
+port = 19898
+bind = "127.0.0.1"
+auth_token = "env:SPACEBOT_API_TOKEN"
+```
+
+<ParamField path="api.enabled" type="boolean" default="true">
+  Enable the HTTP API server.
+</ParamField>
+
+<ParamField path="api.port" type="integer" default="19898">
+  Port to bind the HTTP API server on.
+</ParamField>
+
+<ParamField path="api.bind" type="string" default="127.0.0.1">
+  Address to bind the HTTP API server on.
+</ParamField>
+
+<ParamField path="api.auth_token" type="string">
+  Optional bearer token for API authentication. Supports `env:VAR_NAME` references.
+</ParamField>
+
+## Metrics
+
+```toml
+[metrics]
+enabled = false
+port = 9090
+bind = "0.0.0.0"
+```
+
+<ParamField path="metrics.enabled" type="boolean" default="false">
+  Enable the Prometheus metrics endpoint.
+</ParamField>
+
+<ParamField path="metrics.port" type="integer" default="9090">
+  Port to bind the metrics HTTP server on.
+</ParamField>
+
+<ParamField path="metrics.bind" type="string" default="0.0.0.0">
+  Address to bind the metrics HTTP server on.
+</ParamField>
+
+## Telemetry
+
+```toml
+[telemetry]
+otlp_endpoint = "http://localhost:4318"
+service_name = "spacebot"
+sample_rate = 1.0
+```
+
+<ParamField path="telemetry.otlp_endpoint" type="string">
+  OTLP HTTP endpoint for OpenTelemetry traces. Falls back to `OTEL_EXPORTER_OTLP_ENDPOINT` env var.
+</ParamField>
+
+<ParamField path="telemetry.service_name" type="string" default="spacebot">
+  Service name resource attribute sent with every span.
+</ParamField>
+
+<ParamField path="telemetry.sample_rate" type="float" default="1.0">
+  Trace sample rate (0.0–1.0). Defaults to 1.0 (sample all).
+</ParamField>
+
+## Environment Variables
+
+All string values in `config.toml` support `env:VAR_NAME` references:
+
+```toml
+[llm]
+anthropic_key = "env:ANTHROPIC_API_KEY"
+
+[messaging.discord]
+token = "env:DISCORD_BOT_TOKEN"
+```
+
+You can also set environment variables directly:
+
+- `SPACEBOT_DIR` — instance directory (defaults to `~/.spacebot`)
+- `SPACEBOT_CONFIG_PATH` — path to `config.toml`
+- `SPACEBOT_CRON_TIMEZONE` — default cron timezone
+- `SPACEBOT_USER_TIMEZONE` — default user timezone
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — OpenTelemetry endpoint
+- `OTEL_EXPORTER_OTLP_HEADERS` — OpenTelemetry headers
+
+## Example Configuration
+
+```toml
+[llm]
+anthropic_key = "env:ANTHROPIC_API_KEY"
+openai_key = "env:OPENAI_API_KEY"
+
+[defaults.routing]
+channel = "anthropic/claude-sonnet-4"
+worker = "anthropic/claude-haiku-4.5"
+
+[defaults.routing.task_overrides]
+coding = "anthropic/claude-sonnet-4"
+
+[[agents]]
+id = "my-agent"
+
+[messaging.discord]
+token = "env:DISCORD_BOT_TOKEN"
+
+[[bindings]]
+agent_id = "my-agent"
+channel = "discord"
+guild_id = "123456789"
+```

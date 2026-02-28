@@ -1,0 +1,487 @@
+---
+title: Cortex System Observer
+description: Memory bulletin generation and system-wide observation
+---
+
+The cortex is the agent's inner monologue. The only process that sees across all channels, workers, and branches simultaneously. Its primary job: generate the **memory bulletin** — a periodically refreshed, LLM-curated summary of the agent's knowledge injected into every conversation.
+
+## What the Cortex Does
+
+<Steps>
+  <Step title="Generate memory bulletin">
+    Runs on a configurable interval (default 60 min). Uses `memory_recall` to query across multiple dimensions (identity, events, decisions, preferences), synthesizes into a ~500 word briefing.
+  </Step>
+  
+  <Step title="Supervise running processes">
+    Monitors channels, branches, and workers. Detects hanging workers, cleans up stale branches.
+  </Step>
+  
+  <Step title="Maintain memory graph">
+    Runs periodic maintenance: decay, pruning, merging near-duplicates, cross-channel consolidation.
+  </Step>
+  
+  <Step title="Detect patterns">
+    Observes system-wide activity. Creates observations from repeated behaviors, usage patterns.
+  </Step>
+  
+  <Step title="Admin chat interface">
+    Provides a direct interactive chat with full tool access for system inspection and manual intervention.
+  </Step>
+</Steps>
+
+## Memory Bulletin Generation
+
+The bulletin is cached in `RuntimeConfig::memory_bulletin` and read by every channel via `ArcSwap`:
+
+```rust
+// From src/agent/cortex.rs
+let bulletin = runtime_config.memory_bulletin.load();
+```
+
+No database queries on the hot path. Channels get ambient awareness without blocking.
+
+### Bulletin Prompt
+
+```markdown
+You are the cortex. Generate a brief memory bulletin.
+
+Recall memories across these dimensions:
+- Identity (who the user is, who the agent is)
+- Recent events (what happened recently)
+- Active goals (what the user wants to achieve)
+- Important decisions (choices that were made)
+- Key preferences (what the user likes/dislikes)
+
+Synthesize into a 500-word briefing.
+
+Focus on:
+- High-importance memories
+- Recent activity
+- Ongoing goals
+- Core identity facts
+
+Exclude:
+- Low-importance observations
+- Stale events
+- Forgotten memories
+```
+
+The cortex uses `memory_recall` to query each dimension:
+
+```json
+{
+  "name": "memory_recall",
+  "input": {
+    "query": "",
+    "memory_types": ["identity"],
+    "mode": "important",
+    "limit": 10
+  }
+}
+```
+
+Then synthesizes:
+
+```markdown
+# Memory Bulletin
+Generated: 2024-03-15 14:30:00 UTC
+
+## Identity
+The user is a software engineer based in San Francisco. Works primarily with Rust and TypeScript. Prefers functional programming patterns.
+
+## Recent Activity
+- Completed refactor of authentication module (2024-03-14)
+- Researching best practices for distributed systems (ongoing)
+
+## Active Goals
+- Launch new API v2 by end of month
+- Learn more about consensus algorithms
+
+## Preferences
+- Prefers tabs over spaces
+- Uses Neovim as primary editor
+- Likes detailed technical explanations
+```
+
+### Bulletin Refresh Interval
+
+```toml
+[defaults.warmup]
+enabled = true
+refresh_secs = 3600  # 1 hour
+```
+
+The warmup system handles bulletin refresh:
+
+```rust
+// From src/agent/cortex.rs
+fn should_generate_bulletin_from_bulletin_loop(
+    warmup_config: WarmupConfig,
+    status: &WarmupStatus,
+) -> bool {
+    let age_secs = bulletin_age_secs(status.last_refresh_unix_ms)
+        .or(status.bulletin_age_secs);
+    
+    let Some(age_secs) = age_secs else {
+        return true;  // No recorded refresh yet
+    };
+    
+    age_secs >= warmup_config.refresh_secs.max(1)
+}
+```
+
+## Warmup System
+
+The warmup system ensures agents are ready for work before serving requests:
+
+```rust
+// From src/config.rs
+pub struct WarmupStatus {
+    pub state: WarmupState,
+    pub last_refresh_unix_ms: Option<i64>,
+    pub bulletin_age_secs: Option<u64>,
+    pub last_error: Option<String>,
+}
+
+pub enum WarmupState {
+    Cold,      // Not yet warmed up
+    Warming,   // Warmup in progress
+    Warm,      // Ready for work
+    Degraded,  // Warmup failed but agent still works
+}
+```
+
+### Warmup Workflow
+
+<Steps>
+  <Step title="Agent starts">
+    State: `Cold`
+  </Step>
+  
+  <Step title="Warmup begins">
+    State: `Warming`
+    
+    - Generate memory bulletin
+    - Preload embeddings
+    - Warm up database connections
+  </Step>
+  
+  <Step title="Warmup completes">
+    State: `Warm`
+    
+    Channels/workers/cron jobs check `ready_for_work()`:
+    ```rust
+    fn ready_for_work(&self) -> bool {
+        matches!(self.state, WarmupState::Warm)
+            && self.last_refresh_unix_ms.is_some()
+    }
+    ```
+  </Step>
+  
+  <Step title="Periodic refresh">
+    Every `refresh_secs`, regenerate bulletin. State stays `Warm`.
+  </Step>
+</Steps>
+
+### Cold Dispatch Metrics
+
+If a channel/worker/cron job starts before warmup completes, it's recorded:
+
+```rust
+if !warmup_status.ready_for_work() {
+    tracing::warn!(
+        agent_id = %agent_id,
+        process_type = ?process_type,
+        "dispatched before warmup complete (cold start)"
+    );
+    
+    metrics.cold_dispatch_total
+        .with_label_values(&[&agent_id, process_type_label])
+        .inc();
+}
+```
+
+Cold dispatches work fine — they just don't have the memory bulletin yet.
+
+## Process Supervision
+
+The cortex observes all `ProcessEvent`s:
+
+```rust
+// From src/hooks.rs
+pub enum ProcessEvent {
+    BranchStarted { branch_id, channel_id, description, started_at },
+    BranchComplete { branch_id, channel_id, result },
+    WorkerStarted { worker_id, channel_id, task, started_at },
+    WorkerStatus { worker_id, channel_id, status },
+    WorkerComplete { worker_id, channel_id, result, notify },
+    WorkerTimeout { worker_id, channel_id },
+    // ...
+}
+```
+
+### Detecting Stuck Workers
+
+```rust
+if worker_running_time > timeout_threshold {
+    tracing::warn!(
+        worker_id = %worker_id,
+        running_time_secs = worker_running_time.as_secs(),
+        "worker appears stuck, sending timeout signal"
+    );
+    
+    cancel_worker(worker_id).await?;
+}
+```
+
+### Cleaning Up Stale Branches
+
+```rust
+if branch_running_time > max_branch_lifetime {
+    tracing::warn!(
+        branch_id = %branch_id,
+        "branch exceeded max lifetime, cancelling"
+    );
+    
+    cancel_branch(branch_id).await?;
+}
+```
+
+## Memory Maintenance
+
+The cortex runs periodic memory maintenance:
+
+### Decay
+
+Reduce importance of old, unaccessed memories:
+
+```rust
+// From src/memory/maintenance.rs
+let cutoff = Utc::now() - Duration::days(30);
+let old_memories = store.get_unaccessed_since(cutoff).await?;
+
+for memory in old_memories {
+    if memory.memory_type != MemoryType::Identity {
+        memory.importance *= 0.95;  // 5% decay
+        store.update(&memory).await?;
+    }
+}
+```
+
+Identity memories are exempt.
+
+### Prune
+
+Remove memories below importance threshold:
+
+```rust
+let threshold = 0.1;
+let forgotten = store.get_by_importance_below(threshold).await?;
+
+for memory in forgotten {
+    store.forget(&memory.id).await?;  // Soft delete
+}
+```
+
+### Merge
+
+Detect near-duplicate memories and consolidate:
+
+```rust
+let duplicates = store.find_duplicates(0.95).await?;
+
+for (id1, id2) in duplicates {
+    let merged = merge_memories(id1, id2);
+    store.save(&merged).await?;
+    store.forget(id1).await?;
+    store.forget(id2).await?;
+}
+```
+
+### Cross-Channel Consolidation
+
+If the same fact appears in multiple channels, consolidate:
+
+```rust
+let similar_across_channels = store
+    .find_similar_across_channels(0.9)
+    .await?;
+
+for cluster in similar_across_channels {
+    let canonical = pick_highest_importance(cluster);
+    for duplicate in cluster {
+        if duplicate.id != canonical.id {
+            create_association(
+                duplicate.id,
+                canonical.id,
+                RelationType::Updates
+            );
+            store.forget(&duplicate.id).await?;
+        }
+    }
+}
+```
+
+## Pattern Detection
+
+The cortex creates observations from repeated behaviors:
+
+```rust
+if user_asked_about_rust_5_times_this_week {
+    memory_save(
+        "User is actively learning Rust",
+        MemoryType::Observation,
+        0.6
+    );
+}
+
+if user_mentions_timezone_in_multiple_channels {
+    memory_save(
+        "User is based in America/New_York timezone",
+        MemoryType::Identity,
+        0.9
+    );
+}
+```
+
+Observations become first-class memories.
+
+## Cortex Chat Interface
+
+The cortex provides a direct admin chat for system inspection:
+
+```bash
+curl -X POST http://localhost:5738/api/cortex/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "my-agent",
+    "message": "show me recent memory activity"
+  }'
+```
+
+The cortex has full tool access:
+- `memory_recall` — Query memories
+- `memory_save` — Create memories
+- `system_inspect` — View running processes
+- `channel_list` — List all channels
+- `worker_inspect` — Inspect worker state
+
+Useful for:
+- Debugging memory issues
+- Manually creating/updating memories
+- Inspecting stuck workers
+- Understanding agent state
+
+## Cortex Hook
+
+The cortex uses a specialized hook for system observation:
+
+```rust
+// From src/hooks/cortex.rs
+pub struct CortexHook {
+    pub agent_id: AgentId,
+    pub event_tx: broadcast::Sender<ProcessEvent>,
+}
+
+impl PromptHook for CortexHook {
+    fn on_completion_response(&self, response: &CompletionResponse) -> HookAction {
+        // Observe LLM responses, detect patterns
+        HookAction::Continue
+    }
+    
+    fn on_tool_result(&self, tool_name: &str, result: &str) -> HookAction {
+        // Observe tool usage patterns
+        HookAction::Continue
+    }
+}
+```
+
+## Bulletin Injection
+
+Channels read the bulletin on every turn:
+
+```rust
+// From src/agent/channel.rs
+let bulletin = deps.runtime_config.memory_bulletin.load();
+
+let system_prompt = format!(
+    "{base_prompt}\n\n# Memory Bulletin\n{bulletin}"
+);
+```
+
+Branches inherit the bulletin from their channel's context (it's part of system prompt).
+
+Workers do **not** get the bulletin (they have no channel context).
+
+## Configuration
+
+```toml
+[defaults.warmup]
+enabled = true
+refresh_secs = 3600  # 1 hour
+
+[defaults.cortex]
+maintenance_interval_hours = 24
+decay_factor = 0.95
+prune_threshold = 0.1
+merge_similarity_threshold = 0.95
+```
+
+## Best Practices
+
+<Accordion title="How often to refresh the bulletin">
+  **Frequent refresh (30-60 min):**
+  - High-activity agents with rapid memory creation
+  - Many users creating memories
+  - You want channels to see new memories quickly
+  
+  **Infrequent refresh (2-4 hours):**
+  - Low-activity agents
+  - Single-user environments
+  - You want to minimize LLM calls
+</Accordion>
+
+<Accordion title="When to run memory maintenance">
+  **Daily maintenance:**
+  - Most agents
+  - Balanced decay and pruning
+  
+  **Weekly maintenance:**
+  - Low-memory-creation agents
+  - You want memories to persist longer
+  
+  **Hourly maintenance:**
+  - High-churn environments
+  - Testing/development
+</Accordion>
+
+<Accordion title="How to tune decay and pruning">
+  **Aggressive (forget faster):**
+  ```toml
+  decay_factor = 0.90  # 10% decay
+  prune_threshold = 0.2
+  ```
+  
+  **Conservative (remember longer):**
+  ```toml
+  decay_factor = 0.98  # 2% decay
+  prune_threshold = 0.05
+  ```
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Memory System" icon="brain" href="/core/memory">
+    Learn how memories are stored and searched
+  </Card>
+  <Card title="Channels" icon="message-square" href="/core/channels">
+    See how channels use the memory bulletin
+  </Card>
+  <Card title="Compaction" icon="compress" href="/core/compaction">
+    Understand how compaction extracts memories
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/config">
+    Full cortex configuration reference
+  </Card>
+</CardGroup>

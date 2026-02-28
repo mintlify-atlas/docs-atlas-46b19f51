@@ -1,0 +1,296 @@
+---
+title: MCP Configuration
+description: Configure Model Context Protocol (MCP) servers for tool integration
+---
+
+MCP (Model Context Protocol) servers provide tools and resources to agents. You can configure MCP servers in `[defaults.mcp]` for all agents or per-agent in `[[agents.mcp]]`.
+
+## MCP Server Definition
+
+<ParamField path="name" type="string" required>
+  Unique name for this MCP server.
+  
+  ```toml
+  [[defaults.mcp]]
+  name = "filesystem"
+  ```
+</ParamField>
+
+<ParamField path="transport" type="string" required>
+  Transport protocol for communicating with the server.
+  
+  Valid values: `stdio`, `http`
+  
+  ```toml
+  [[defaults.mcp]]
+  name = "filesystem"
+  transport = "stdio"
+  ```
+</ParamField>
+
+<ParamField path="enabled" type="boolean" default="true">
+  Whether this MCP server is enabled.
+  
+  ```toml
+  [[defaults.mcp]]
+  name = "filesystem"
+  transport = "stdio"
+  enabled = true
+  ```
+</ParamField>
+
+## Stdio Transport
+
+For MCP servers that communicate via stdin/stdout.
+
+<ParamField path="command" type="string" required>
+  Command to execute to start the MCP server.
+  
+  ```toml
+  [[defaults.mcp]]
+  name = "filesystem"
+  transport = "stdio"
+  command = "npx"
+  ```
+</ParamField>
+
+<ParamField path="args" type="array">
+  Command-line arguments passed to the command.
+  
+  ```toml
+  [[defaults.mcp]]
+  name = "filesystem"
+  transport = "stdio"
+  command = "npx"
+  args = ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+  ```
+</ParamField>
+
+<ParamField path="env" type="object">
+  Environment variables passed to the MCP server process.
+  
+  ```toml
+  [[defaults.mcp]]
+  name = "github"
+  transport = "stdio"
+  command = "npx"
+  args = ["-y", "@modelcontextprotocol/server-github"]
+  env = { GITHUB_TOKEN = "env:GITHUB_TOKEN" }
+  ```
+</ParamField>
+
+## HTTP Transport
+
+For MCP servers that communicate via HTTP.
+
+<ParamField path="url" type="string" required>
+  HTTP endpoint URL for the MCP server.
+  
+  ```toml
+  [[defaults.mcp]]
+  name = "remote_mcp"
+  transport = "http"
+  url = "https://mcp.example.com/api"
+  ```
+</ParamField>
+
+<ParamField path="headers" type="object">
+  HTTP headers sent with requests to the MCP server.
+  
+  ```toml
+  [[defaults.mcp]]
+  name = "remote_mcp"
+  transport = "http"
+  url = "https://mcp.example.com/api"
+  headers = { Authorization = "Bearer env:MCP_TOKEN" }
+  ```
+</ParamField>
+
+## Default vs Per-Agent MCP Servers
+
+MCP servers configured in `[defaults.mcp]` are available to all agents. Per-agent MCP servers override the defaults for that specific agent.
+
+```toml
+# Available to all agents
+[[defaults.mcp]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/shared"]
+
+# Override for a specific agent
+[[agents]]
+id = "dev"
+
+[[agents.mcp]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"]
+
+[[agents.mcp]]
+name = "github"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_TOKEN = "env:GITHUB_TOKEN" }
+```
+
+The `dev` agent gets:
+- Custom filesystem server (overrides default)
+- GitHub server (in addition to default)
+
+Other agents get:
+- Default filesystem server
+
+## Examples
+
+### Filesystem Server
+
+```toml
+[[defaults.mcp]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+```
+
+Provides file system access to the `/workspace` directory.
+
+### GitHub Server
+
+```toml
+[[defaults.mcp]]
+name = "github"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_TOKEN = "env:GITHUB_TOKEN" }
+```
+
+Provides GitHub API access with authentication.
+
+### Brave Search Server
+
+```toml
+[[defaults.mcp]]
+name = "brave_search"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-brave-search"]
+env = { BRAVE_API_KEY = "env:BRAVE_SEARCH_API_KEY" }
+```
+
+Provides web search via Brave Search API.
+
+### Postgres Server
+
+```toml
+[[defaults.mcp]]
+name = "postgres"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-postgres", "postgresql://user:pass@localhost/mydb"]
+```
+
+Provides database access to a PostgreSQL database.
+
+### HTTP MCP Server
+
+```toml
+[[defaults.mcp]]
+name = "remote_tools"
+transport = "http"
+url = "https://mcp.example.com/api"
+headers = { Authorization = "Bearer env:MCP_API_TOKEN", X-API-Version = "v1" }
+```
+
+Connects to a remote MCP server via HTTP.
+
+### Multiple MCP Servers
+
+```toml
+# Filesystem access
+[[defaults.mcp]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+
+# GitHub API
+[[defaults.mcp]]
+name = "github"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_TOKEN = "env:GITHUB_TOKEN" }
+
+# Web search
+[[defaults.mcp]]
+name = "brave_search"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-brave-search"]
+env = { BRAVE_API_KEY = "env:BRAVE_SEARCH_API_KEY" }
+
+# Database access (disabled by default)
+[[defaults.mcp]]
+name = "postgres"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-postgres", "postgresql://user:pass@localhost/mydb"]
+enabled = false
+```
+
+### Per-Agent MCP Configuration
+
+```toml
+# Default filesystem server for all agents
+[[defaults.mcp]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/shared"]
+
+# Dev agent gets custom workspace and GitHub access
+[[agents]]
+id = "dev"
+
+[[agents.mcp]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"]
+
+[[agents.mcp]]
+name = "github"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_TOKEN = "env:GITHUB_TOKEN" }
+
+# Research agent gets web search
+[[agents]]
+id = "research"
+
+[[agents.mcp]]
+name = "brave_search"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-brave-search"]
+env = { BRAVE_API_KEY = "env:BRAVE_SEARCH_API_KEY" }
+```
+
+## Available MCP Servers
+
+Official MCP servers from the Model Context Protocol project:
+
+- `@modelcontextprotocol/server-filesystem` - File system access
+- `@modelcontextprotocol/server-github` - GitHub API integration
+- `@modelcontextprotocol/server-brave-search` - Web search via Brave
+- `@modelcontextprotocol/server-postgres` - PostgreSQL database access
+- `@modelcontextprotocol/server-sqlite` - SQLite database access
+- `@modelcontextprotocol/server-google-maps` - Google Maps API
+- `@modelcontextprotocol/server-slack` - Slack API integration
+
+You can also build custom MCP servers following the [MCP specification](https://spec.modelcontextprotocol.io/).

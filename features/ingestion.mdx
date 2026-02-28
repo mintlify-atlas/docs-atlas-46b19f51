@@ -1,0 +1,328 @@
+---
+title: 'Memory Ingestion'
+description: 'Bulk memory import from files'
+---
+
+Spacebot's ingestion system processes files from a watched directory, extracts text, chunks it, and imports each chunk as memories via the standard memory recall + save flow.
+
+## How It Works
+
+Ingestion is a background polling loop:
+
+<Steps>
+  <Step title="Poll Directory">
+    Every `poll_interval_secs`, scan the ingestion directory for supported files.
+  </Step>
+  <Step title="Read File">
+    Extract text content (plaintext files read as UTF-8, PDFs via `pdf_extract`).
+  </Step>
+  <Step title="Chunk">
+    Split text into chunks at line boundaries (target: `chunk_size` characters).
+  </Step>
+  <Step title="Process Chunk">
+    Create a fresh branch for each chunk. The branch uses `memory_recall` to check for duplicates, then `memory_save` to store new knowledge.
+  </Step>
+  <Step title="Track Progress">
+    Each chunk's completion is recorded in `ingestion_progress` table. If the server restarts mid-file, already-completed chunks are skipped.
+  </Step>
+  <Step title="Clean Up">
+    When all chunks succeed, delete the source file and progress records. On failure, keep the file for retry.
+  </Step>
+</Steps>
+
+## Configuration
+
+```toml agent.toml
+[ingestion]
+enabled = true
+poll_interval_secs = 60
+chunk_size = 4000
+```
+
+<ParamField path="enabled" type="boolean">
+  Whether to run the ingestion loop (default: false)
+</ParamField>
+
+<ParamField path="poll_interval_secs" type="integer">
+  How often to scan for new files (default: 60)
+</ParamField>
+
+<ParamField path="chunk_size" type="integer">
+  Target chunk size in characters (default: 4000). Chunks split at line boundaries—no partial lines.
+</ParamField>
+
+## Ingestion Directory
+
+Files are read from `{workspace}/ingest/`:
+
+```bash
+~/spacebot-data/agents/spacebot/workspace/ingest/
+  notes.txt
+  research.pdf
+  transcript.md
+```
+
+Drop files here and the ingestion loop picks them up on the next poll.
+
+## Supported Formats
+
+Text-like files and PDFs:
+
+- **Plain text**: `.txt`, `.md`, `.log`
+- **Structured data**: `.json`, `.jsonl`, `.csv`, `.tsv`, `.yaml`, `.yml`, `.toml`
+- **Markup**: `.xml`, `.html`, `.htm`, `.rst`, `.org`
+- **Documents**: `.pdf`
+
+Files without extensions are treated as text and attempted as UTF-8.
+
+```rust src/agent/ingestion.rs
+fn is_supported_ingest_file(path: &Path) -> bool {
+    matches!(
+        ext,
+        "txt" | "md" | "markdown" | "json" | "jsonl" | "csv" |
+        "tsv" | "log" | "xml" | "yaml" | "yml" | "toml" |
+        "rst" | "org" | "html" | "htm" | "pdf"
+    )
+}
+```
+
+Unsupported files (images, binaries) are skipped with a warning.
+
+## Chunking
+
+Text is split at line boundaries to preserve semantic units:
+
+```rust src/agent/ingestion.rs
+fn chunk_text(text: &str, chunk_size: usize) -> Vec<String> {
+    // If adding this line exceeds chunk_size and we have content, finalize chunk
+    // Long lines exceeding chunk_size get their own chunk
+}
+```
+
+**Example:**
+
+```
+Input (10,000 chars, chunk_size=4000):
+  Line 1 (500 chars)
+  Line 2 (1500 chars)
+  Line 3 (2500 chars)  <- chunk 1 (4500 total, exceeds limit)
+  Line 4 (3000 chars)  <- chunk 2
+  Line 5 (2500 chars)  <- chunk 3
+
+Chunks:
+  1. Lines 1-2 (2000 chars)
+  2. Line 3 (2500 chars)
+  3. Line 4 (3000 chars)
+  4. Line 5 (2500 chars)
+```
+
+## Processing Flow
+
+Each chunk gets a fresh LLM agent with memory tools:
+
+```rust src/agent/ingestion.rs
+let agent = AgentBuilder::new(model)
+    .preamble(&ingestion_prompt)
+    .default_max_turns(10)
+    .tool_server_handle(tool_server)
+    .build();
+
+let user_prompt = format!(
+    "Process chunk {}/{} from {}:\n\n{}",
+    chunk_number, total_chunks, filename, chunk
+);
+
+let response = agent.prompt(&user_prompt).with_history(&mut history).await?;
+```
+
+The ingestion prompt instructs the agent to:
+
+1. Read the chunk
+2. Use `memory_recall` to check for duplicates or related memories
+3. Extract facts, decisions, preferences, or events
+4. Save via `memory_save` with appropriate types and importance
+
+<Note>
+  Each chunk is independent—no history carries over between chunks. This keeps memory usage bounded.
+</Note>
+
+## Progress Tracking
+
+Progress is tracked by content hash (SHA-256):
+
+```sql
+CREATE TABLE ingestion_progress (
+    content_hash TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    total_chunks INTEGER NOT NULL,
+    filename TEXT NOT NULL,
+    PRIMARY KEY (content_hash, chunk_index)
+);
+
+CREATE TABLE ingestion_files (
+    content_hash TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    total_chunks INTEGER NOT NULL,
+    status TEXT NOT NULL,  -- queued, processing, completed, failed
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+);
+```
+
+If ingestion is interrupted:
+
+<Steps>
+  <Step title="Restart">
+    Server restarts. Ingestion loop resumes.
+  </Step>
+  <Step title="Scan">
+    File is still in `ingest/` directory.
+  </Step>
+  <Step title="Resume">
+    Load completed chunks from `ingestion_progress`.
+  </Step>
+  <Step title="Skip Completed">
+    Only process chunks not in the completed set.
+  </Step>
+  <Step title="Finish">
+    When all chunks succeed, delete file and progress records.
+  </Step>
+</Steps>
+
+## Failure Handling
+
+If any chunk errors (e.g., provider 401, rate limit):
+
+- The file stays in `ingest/`
+- Progress records persist
+- Status is marked `failed` in `ingestion_files`
+- The next poll retries failed chunks
+
+```rust src/agent/ingestion.rs
+if had_failure {
+    // Keep the source file and progress for retry
+    return Ok(());
+}
+
+// Full success: clean up
+delete_progress(&pool, &hash).await?;
+tokio::fs::remove_file(path).await?;
+```
+
+This prevents data loss when transient errors interrupt ingestion.
+
+## API Access
+
+Upload files via HTTP:
+
+```bash
+curl -X POST http://localhost:3000/api/agents/spacebot/ingest \
+  -F "file=@notes.txt"
+```
+
+The API writes the file to `{workspace}/ingest/` and marks it as `queued` in `ingestion_files`. The polling loop picks it up on the next scan.
+
+Query ingestion status:
+
+```bash
+curl http://localhost:3000/api/agents/spacebot/ingest/status
+```
+
+Returns:
+
+```json
+{
+  "files": [
+    {
+      "filename": "notes.txt",
+      "status": "processing",
+      "total_chunks": 10,
+      "completed_chunks": 7,
+      "created_at": "2026-02-28T10:00:00Z"
+    },
+    {
+      "filename": "research.pdf",
+      "status": "completed",
+      "total_chunks": 25,
+      "completed_chunks": 25,
+      "created_at": "2026-02-27T14:30:00Z",
+      "completed_at": "2026-02-27T14:35:00Z"
+    }
+  ]
+}
+```
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Meeting Transcripts" icon="comments">
+    Export Zoom/Meet transcripts as text. Spacebot ingests and saves key decisions, action items, and context.
+  </Card>
+  <Card title="Documentation" icon="book">
+    Import project docs, READMEs, or API references as memories for later recall.
+  </Card>
+  <Card title="Research Papers" icon="file-pdf">
+    Upload PDFs. Spacebot extracts text, chunks, and saves findings.
+  </Card>
+  <Card title="Email Archives" icon="envelope">
+    Export mailbox as JSONL or CSV. Ingestion creates memories from important threads.
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Pre-process Large Files">
+    Files over 1MB should be split before ingestion. Chunking happens in-memory—extremely large files may hit memory limits.
+  </Accordion>
+  <Accordion title="Clean Up Noise">
+    Remove headers, footers, or boilerplate before ingesting. The LLM processes everything, so cleaner input = better memories.
+  </Accordion>
+  <Accordion title="Monitor Failures">
+    Check the `ingestion_files` table for `failed` status. Common causes: rate limits, invalid UTF-8, or corrupted PDFs.
+  </Accordion>
+  <Accordion title="Use Descriptive Filenames">
+    The filename is included in the chunk prompt. `2026-02-28-standup.txt` is better than `notes.txt`.
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  **Ingestion is not instant.** A 100KB file (~25 chunks) takes 2-5 minutes to process depending on LLM latency. For bulk imports, enable ingestion and let it run overnight.
+</Warning>
+
+## Performance Tuning
+
+<ParamField path="poll_interval_secs">
+  Lower = faster pickup, higher = less polling overhead. 60s is reasonable for most use cases.
+</ParamField>
+
+<ParamField path="chunk_size">
+  Smaller chunks = faster per-chunk processing, more chunks total. 4000 chars is ~1000 tokens, a good balance.
+</ParamField>
+
+Ingestion runs in a background tokio task. It won't block channels or workers.
+
+## Debugging
+
+Enable ingestion logs:
+
+```bash
+RUST_LOG=spacebot::agent::ingestion=debug spacebot run
+```
+
+Logs show:
+
+```
+[INFO] ingestion loop started, path=/workspace/ingest
+[INFO] starting file ingestion, file=notes.txt, chunks=10
+[DEBUG] processing chunk 1/10, chars=3500
+[DEBUG] chunk processed, file=notes.txt, chunk=1/10
+[INFO] file ingestion complete, file=notes.txt, chunks=10, status=completed
+```
+
+Failed chunks log errors:
+
+```
+[ERROR] failed to process chunk, file=notes.txt, chunk=3/10, error=provider rate limit exceeded
+```

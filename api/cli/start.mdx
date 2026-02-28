@@ -1,0 +1,143 @@
+---
+title: spacebot start
+description: Start the Spacebot daemon
+---
+
+## Overview
+
+Starts the Spacebot daemon. This is the default command when you run `spacebot` without any subcommand.
+
+## Usage
+
+```bash
+spacebot start [OPTIONS]
+```
+
+## Options
+
+<ParamField path="--foreground" type="boolean" default="false">
+  Run in the foreground instead of daemonizing. When enabled, the process stays attached to your terminal and logs to stdout/stderr.
+</ParamField>
+
+<ParamField path="--config" type="path">
+  Path to a custom config file. If not specified, Spacebot loads configuration from the default location (`~/.spacebot/config.toml`).
+</ParamField>
+
+<ParamField path="--debug" type="boolean" default="false">
+  Enable debug-level logging. Increases log verbosity for troubleshooting.
+</ParamField>
+
+## Behavior
+
+When you run `spacebot start`, the following happens:
+
+1. **Checks if already running**: If a daemon is already running, the command exits with an error showing the existing process ID.
+
+2. **Runs onboarding**: If this is your first time running Spacebot, you'll go through an interactive setup wizard to configure authentication and basic settings.
+
+3. **Validates configuration**: Loads and validates your config file before starting the daemon to catch errors early.
+
+4. **Forks to background**: Unless `--foreground` is set, the process daemonizes and detaches from your terminal.
+
+5. **Initializes subsystems**: Starts the HTTP API server, messaging adapters (Discord, Telegram, etc.), and agent processes.
+
+6. **Writes PID file**: Stores the daemon's process ID in `~/.spacebot/spacebot.pid` for management commands.
+
+## Examples
+
+### Start daemon in background
+
+```bash
+spacebot start
+```
+
+Output:
+```
+spacebot daemon started (pid 42819)
+```
+
+### Start in foreground with debug logging
+
+<CodeGroup>
+```bash Default
+spacebot start --foreground --debug
+```
+
+```bash Short flags
+spacebot start -f -d
+```
+</CodeGroup>
+
+Output:
+```
+spacebot running in foreground (pid 42820)
+[DEBUG] loading config from /home/user/.spacebot/config.toml
+[INFO] starting HTTP API on 127.0.0.1:19898
+[INFO] connected to Discord gateway
+...
+```
+
+### Start with custom config
+
+```bash
+spacebot start --config /etc/spacebot/production.toml
+```
+
+### Default behavior
+
+```bash
+spacebot  # equivalent to 'spacebot start'
+```
+
+## Error Cases
+
+### Already running
+
+```bash
+$ spacebot start
+spacebot is already running (pid 42819)
+```
+
+Solution: Stop the existing daemon first with `spacebot stop`, or use `spacebot restart`.
+
+### Missing authentication
+
+```
+No LLM provider keys configured.
+Please add a provider key via the web UI at http://127.0.0.1:19898
+```
+
+Solution: Run `spacebot auth login` or configure API keys via the web UI.
+
+### Invalid config
+
+```bash
+$ spacebot start --config invalid.toml
+Error: failed to load config from invalid.toml
+Caused by:
+    TOML parse error at line 5, column 10
+```
+
+Solution: Fix the configuration syntax error before starting.
+
+## Foreground vs Background
+
+| Mode | Use Case | Logs | Ctrl+C |
+|------|----------|------|--------|
+| Background (default) | Production, always-on | Written to `~/.spacebot/logs/` | Does not stop daemon |
+| Foreground (`--foreground`) | Development, debugging | Stdout/stderr | Stops daemon |
+
+## Related Commands
+
+- [`spacebot stop`](/api/cli/stop) - Stop the running daemon
+- [`spacebot status`](/api/cli/status) - Check daemon status
+- [`spacebot auth login`](/api/cli/auth) - Authenticate with LLM providers
+
+## Process Lifecycle
+
+The daemon runs until:
+- You explicitly stop it with `spacebot stop`
+- The system shuts down or restarts
+- An unrecoverable error occurs (daemon exits with error logs)
+
+The daemon does NOT automatically restart on failure. Use a process supervisor like systemd or Docker for production deployments.

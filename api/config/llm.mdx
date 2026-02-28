@@ -1,0 +1,275 @@
+---
+title: LLM Configuration
+description: Configure LLM provider credentials and custom providers
+---
+
+The `[llm]` section configures LLM provider credentials and custom provider endpoints. You can use built-in providers or define custom ones.
+
+## Built-in Provider Keys
+
+Spacebot supports multiple LLM providers. Configure credentials for the providers you want to use.
+
+<ParamField path="anthropic_key" type="string">
+  Anthropic API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  anthropic_key = "env:ANTHROPIC_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="openai_key" type="string">
+  OpenAI API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  openai_key = "env:OPENAI_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="openrouter_key" type="string">
+  OpenRouter API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  openrouter_key = "env:OPENROUTER_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="kilo_key" type="string">
+  Kilo Gateway API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  kilo_key = "env:KILO_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="gemini_key" type="string">
+  Google Gemini API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  gemini_key = "env:GEMINI_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="groq_key" type="string">
+  Groq API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  groq_key = "env:GROQ_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="deepseek_key" type="string">
+  DeepSeek API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  deepseek_key = "env:DEEPSEEK_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="xai_key" type="string">
+  xAI (Grok) API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  xai_key = "env:XAI_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="mistral_key" type="string">
+  Mistral AI API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  mistral_key = "env:MISTRAL_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="together_key" type="string">
+  Together AI API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  together_key = "env:TOGETHER_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="fireworks_key" type="string">
+  Fireworks AI API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  fireworks_key = "env:FIREWORKS_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="nvidia_key" type="string">
+  NVIDIA NIM API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  nvidia_key = "env:NVIDIA_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="zhipu_key" type="string">
+  Z.AI (GLM) API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  zhipu_key = "env:ZHIPU_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="minimax_key" type="string">
+  MiniMax API key (international endpoint). Supports `env:VAR_NAME` references.
+  
+  ```toml
+  minimax_key = "env:MINIMAX_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="minimax_cn_key" type="string">
+  MiniMax API key (China endpoint). Supports `env:VAR_NAME` references.
+  
+  ```toml
+  minimax_cn_key = "env:MINIMAX_CN_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="moonshot_key" type="string">
+  Moonshot AI API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  moonshot_key = "env:MOONSHOT_API_KEY"
+  ```
+</ParamField>
+
+<ParamField path="zai_coding_plan_key" type="string">
+  Z.AI Coding Plan API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  zai_coding_plan_key = "env:ZAI_CODING_PLAN_KEY"
+  ```
+</ParamField>
+
+<ParamField path="opencode_zen_key" type="string">
+  OpenCode Zen API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  opencode_zen_key = "env:OPENCODE_ZEN_KEY"
+  ```
+</ParamField>
+
+<ParamField path="opencode_go_key" type="string">
+  OpenCode Go API key. Supports `env:VAR_NAME` references.
+  
+  ```toml
+  opencode_go_key = "env:OPENCODE_GO_KEY"
+  ```
+</ParamField>
+
+<ParamField path="ollama_base_url" type="string">
+  Ollama server base URL. Defaults to `http://localhost:11434`.
+  
+  ```toml
+  ollama_base_url = "http://localhost:11434"
+  ```
+</ParamField>
+
+<ParamField path="ollama_key" type="string">
+  Optional Ollama API key (rarely needed for local deployments).
+  
+  ```toml
+  ollama_key = "env:OLLAMA_KEY"
+  ```
+</ParamField>
+
+## Custom Providers
+
+Define custom provider endpoints to use models from any OpenAI-compatible or Anthropic-compatible API.
+
+<ParamField path="provider.<name>" type="object">
+  Custom provider configuration. Replace `<name>` with your provider identifier.
+  
+  <Expandable title="Properties">
+    <ResponseField name="api_type" type="string" required>
+      API compatibility type. Must be one of:
+      - `openai_completions` - OpenAI Chat Completions API (`/v1/chat/completions`)
+      - `openai_chat_completions` - OpenAI-compatible API (`/chat/completions`)
+      - `anthropic` - Anthropic Messages API (`/v1/messages`)
+      - `gemini` - Google Gemini API
+      - `kilo_gateway` - Kilo Gateway API with required headers
+      - `openai_responses` - OpenAI Responses API (`/v1/responses`)
+    </ResponseField>
+    
+    <ResponseField name="base_url" type="string" required>
+      Base URL for the provider API endpoint.
+    </ResponseField>
+    
+    <ResponseField name="api_key" type="string" required>
+      API key for authentication. Supports `env:VAR_NAME` references.
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Optional display name for the provider.
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+## Examples
+
+### Using Built-in Providers
+
+```toml
+[llm]
+anthropic_key = "env:ANTHROPIC_API_KEY"
+openai_key = "env:OPENAI_API_KEY"
+openrouter_key = "env:OPENROUTER_API_KEY"
+```
+
+### Custom Provider with OpenAI API
+
+```toml
+[llm.provider.my_openai_proxy]
+api_type = "openai_completions"
+base_url = "https://my-proxy.example.com/v1"
+api_key = "env:MY_PROXY_KEY"
+name = "My OpenAI Proxy"
+```
+
+### Custom Provider with Anthropic API
+
+```toml
+[llm.provider.my_anthropic_proxy]
+api_type = "anthropic"
+base_url = "https://my-proxy.example.com"
+api_key = "env:MY_ANTHROPIC_PROXY_KEY"
+name = "My Anthropic Proxy"
+```
+
+### Local Ollama Instance
+
+```toml
+[llm]
+ollama_base_url = "http://localhost:11434"
+```
+
+### Multiple Providers
+
+```toml
+[llm]
+anthropic_key = "env:ANTHROPIC_API_KEY"
+openrouter_key = "env:OPENROUTER_API_KEY"
+groq_key = "env:GROQ_API_KEY"
+ollama_base_url = "http://localhost:11434"
+
+[llm.provider.custom_endpoint]
+api_type = "openai_completions"
+base_url = "https://api.example.com/v1"
+api_key = "env:CUSTOM_API_KEY"
+```
+
+## Environment Variable References
+
+All credential fields support `env:VAR_NAME` references to read values from environment variables:
+
+```toml
+[llm]
+anthropic_key = "env:ANTHROPIC_API_KEY"  # Reads from $ANTHROPIC_API_KEY
+openai_key = "env:OPENAI_API_KEY"        # Reads from $OPENAI_API_KEY
+```
+
+This keeps sensitive credentials out of your config file.

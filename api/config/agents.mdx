@@ -1,0 +1,527 @@
+---
+title: Agent Configuration
+description: Configure individual agents with custom settings and overrides
+---
+
+The `[[agents]]` array defines individual agents. Each agent inherits settings from `[defaults]` but can override any value.
+
+## Agent Definition
+
+<ParamField path="id" type="string" required>
+  Unique identifier for the agent. Used in bindings and API calls.
+  
+  ```toml
+  [[agents]]
+  id = "support"
+  ```
+</ParamField>
+
+<ParamField path="default" type="boolean" default="false">
+  Whether this agent is the default. The default agent handles messages that don't match any binding.
+  
+  Only one agent can be marked as default.
+  
+  ```toml
+  [[agents]]
+  id = "main"
+  default = true
+  ```
+</ParamField>
+
+<ParamField path="display_name" type="string">
+  Human-readable name shown in the UI and topology graph.
+  
+  ```toml
+  [[agents]]
+  id = "support"
+  display_name = "Support Bot"
+  ```
+</ParamField>
+
+<ParamField path="role" type="string">
+  Description of the agent's role (e.g., "handles tier 1 support"). Shown in the UI.
+  
+  ```toml
+  [[agents]]
+  id = "support"
+  role = "Handles customer support inquiries"
+  ```
+</ParamField>
+
+<ParamField path="workspace" type="string">
+  Custom workspace directory path. If not set, defaults to `~/.spacebot/agents/{id}/workspace`.
+  
+  ```toml
+  [[agents]]
+  id = "dev"
+  workspace = "/home/user/projects/dev-workspace"
+  ```
+</ParamField>
+
+## Routing Overrides
+
+<ParamField path="routing" type="object">
+  Override model routing for this agent. See [Routing Configuration](/api/config/routing) for details.
+  
+  ```toml
+  [[agents]]
+  id = "coding"
+  routing = { worker = "anthropic/claude-sonnet-4" }
+  ```
+</ParamField>
+
+## Concurrency Settings
+
+<ParamField path="max_concurrent_branches" type="integer" default="5">
+  Maximum number of branches this agent can run simultaneously.
+  
+  ```toml
+  [[agents]]
+  id = "research"
+  max_concurrent_branches = 10
+  ```
+</ParamField>
+
+<ParamField path="max_concurrent_workers" type="integer" default="5">
+  Maximum number of workers this agent can run simultaneously.
+  
+  ```toml
+  [[agents]]
+  id = "coding"
+  max_concurrent_workers = 3
+  ```
+</ParamField>
+
+## Turn Limits
+
+<ParamField path="max_turns" type="integer" default="5">
+  Maximum LLM turns per channel interaction. The channel process typically uses 1-3 turns.
+  
+  ```toml
+  [[agents]]
+  id = "main"
+  max_turns = 10
+  ```
+</ParamField>
+
+<ParamField path="branch_max_turns" type="integer" default="50">
+  Maximum LLM turns per branch. Branches can iterate many times.
+  
+  ```toml
+  [[agents]]
+  id = "research"
+  branch_max_turns = 100
+  ```
+</ParamField>
+
+## Context Settings
+
+<ParamField path="context_window" type="integer" default="128000">
+  Context window size in tokens. Used for compaction thresholds.
+  
+  ```toml
+  [[agents]]
+  id = "main"
+  context_window = 200000
+  ```
+</ParamField>
+
+<ParamField path="compaction" type="object">
+  Compaction threshold overrides.
+  
+  <Expandable title="Properties">
+    <ResponseField name="background_threshold" type="float" default="0.80">
+      Context fullness (0.0-1.0) that triggers background compaction.
+    </ResponseField>
+    
+    <ResponseField name="aggressive_threshold" type="float" default="0.85">
+      Context fullness that triggers aggressive summarization.
+    </ResponseField>
+    
+    <ResponseField name="emergency_threshold" type="float" default="0.95">
+      Context fullness that triggers emergency truncation (no LLM).
+    </ResponseField>
+  </Expandable>
+  
+  ```toml
+  [[agents]]
+  id = "main"
+  compaction = { background_threshold = 0.75, aggressive_threshold = 0.85 }
+  ```
+</ParamField>
+
+## Memory Settings
+
+<ParamField path="memory_persistence" type="object">
+  Auto-branching memory persistence configuration.
+  
+  <Expandable title="Properties">
+    <ResponseField name="enabled" type="boolean" default="true">
+      Whether automatic memory persistence branches are enabled.
+    </ResponseField>
+    
+    <ResponseField name="message_interval" type="integer" default="50">
+      Number of user messages between automatic memory persistence branches.
+    </ResponseField>
+  </Expandable>
+  
+  ```toml
+  [[agents]]
+  id = "main"
+  memory_persistence = { enabled = true, message_interval = 30 }
+  ```
+</ParamField>
+
+## Message Handling
+
+<ParamField path="coalesce" type="object">
+  Message coalescing configuration for rapid-fire messages.
+  
+  <Expandable title="Properties">
+    <ResponseField name="enabled" type="boolean" default="true">
+      Enable message coalescing for multi-user channels.
+    </ResponseField>
+    
+    <ResponseField name="debounce_ms" type="integer" default="1500">
+      Initial debounce window after first message (milliseconds).
+    </ResponseField>
+    
+    <ResponseField name="max_wait_ms" type="integer" default="5000">
+      Maximum time to wait before flushing (milliseconds).
+    </ResponseField>
+    
+    <ResponseField name="min_messages" type="integer" default="2">
+      Minimum messages to trigger coalesce mode (1 = always, 2 = only on burst).
+    </ResponseField>
+    
+    <ResponseField name="multi_user_only" type="boolean" default="true">
+      Apply only to multi-user conversations (skip for DMs).
+    </ResponseField>
+  </Expandable>
+  
+  ```toml
+  [[agents]]
+  id = "chat"
+  coalesce = { debounce_ms = 2000, max_wait_ms = 6000 }
+  ```
+</ParamField>
+
+## File Ingestion
+
+<ParamField path="ingestion" type="object">
+  File-based memory ingestion configuration.
+  
+  <Expandable title="Properties">
+    <ResponseField name="enabled" type="boolean" default="true">
+      Whether file-based memory ingestion is enabled.
+    </ResponseField>
+    
+    <ResponseField name="poll_interval_secs" type="integer" default="30">
+      How often to scan the ingest directory for new files (seconds).
+    </ResponseField>
+    
+    <ResponseField name="chunk_size" type="integer" default="4000">
+      Target chunk size in characters for file processing.
+    </ResponseField>
+  </Expandable>
+  
+  ```toml
+  [[agents]]
+  id = "docs"
+  ingestion = { enabled = true, poll_interval_secs = 60, chunk_size = 8000 }
+  ```
+</ParamField>
+
+## System Configuration
+
+<ParamField path="cortex" type="object">
+  Cortex (system observer) configuration.
+  
+  <Expandable title="Properties">
+    <ResponseField name="tick_interval_secs" type="integer" default="30">
+      Cortex main loop interval (seconds).
+    </ResponseField>
+    
+    <ResponseField name="worker_timeout_secs" type="integer" default="300">
+      Worker timeout (seconds).
+    </ResponseField>
+    
+    <ResponseField name="branch_timeout_secs" type="integer" default="60">
+      Branch timeout (seconds).
+    </ResponseField>
+    
+    <ResponseField name="circuit_breaker_threshold" type="integer" default="3">
+      Consecutive failures before circuit breaker trips.
+    </ResponseField>
+    
+    <ResponseField name="bulletin_interval_secs" type="integer" default="3600">
+      Interval between memory bulletin refreshes (seconds).
+    </ResponseField>
+    
+    <ResponseField name="bulletin_max_words" type="integer" default="1500">
+      Target word count for the memory bulletin.
+    </ResponseField>
+    
+    <ResponseField name="bulletin_max_turns" type="integer" default="15">
+      Maximum LLM turns for bulletin generation.
+    </ResponseField>
+    
+    <ResponseField name="association_interval_secs" type="integer" default="300">
+      Interval between memory association passes (seconds).
+    </ResponseField>
+    
+    <ResponseField name="association_similarity_threshold" type="float" default="0.85">
+      Minimum cosine similarity to create a RelatedTo edge.
+    </ResponseField>
+    
+    <ResponseField name="association_updates_threshold" type="float" default="0.95">
+      Minimum cosine similarity to create an Updates edge (near-duplicate).
+    </ResponseField>
+    
+    <ResponseField name="association_max_per_pass" type="integer" default="100">
+      Maximum associations to create per pass (rate limit).
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="warmup" type="object">
+  Warmup configuration for background model loading.
+  
+  <Expandable title="Properties">
+    <ResponseField name="enabled" type="boolean" default="true">
+      Enable background warmup passes.
+    </ResponseField>
+    
+    <ResponseField name="eager_embedding_load" type="boolean" default="true">
+      Force-load the embedding model before first recall/write workloads.
+    </ResponseField>
+    
+    <ResponseField name="refresh_secs" type="integer" default="900">
+      Interval between warmup refresh passes (seconds).
+    </ResponseField>
+    
+    <ResponseField name="startup_delay_secs" type="integer" default="5">
+      Startup delay before the first warmup pass (seconds).
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+## Tool Configuration
+
+<ParamField path="browser" type="object">
+  Browser automation configuration for workers.
+  
+  <Expandable title="Properties">
+    <ResponseField name="enabled" type="boolean" default="true">
+      Whether browser tools are available to workers.
+    </ResponseField>
+    
+    <ResponseField name="headless" type="boolean" default="true">
+      Run Chrome in headless mode.
+    </ResponseField>
+    
+    <ResponseField name="evaluate_enabled" type="boolean" default="false">
+      Allow JavaScript evaluation via the browser tool.
+    </ResponseField>
+    
+    <ResponseField name="executable_path" type="string">
+      Custom Chrome/Chromium executable path.
+    </ResponseField>
+    
+    <ResponseField name="screenshot_dir" type="string">
+      Directory for storing screenshots. Defaults to agent data directory.
+    </ResponseField>
+  </Expandable>
+  
+  ```toml
+  [[agents]]
+  id = "research"
+  browser = { enabled = true, headless = false }
+  ```
+</ParamField>
+
+<ParamField path="mcp" type="array">
+  MCP server configuration for this agent. See [MCP Configuration](/api/config/mcp) for details.
+  
+  ```toml
+  [[agents]]
+  id = "dev"
+  
+  [[agents.mcp]]
+  name = "filesystem"
+  transport = "stdio"
+  command = "npx"
+  args = ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+  ```
+</ParamField>
+
+<ParamField path="brave_search_key" type="string">
+  Brave Search API key for web search tool. Overrides the default setting. Supports `env:VAR_NAME`.
+  
+  ```toml
+  [[agents]]
+  id = "research"
+  brave_search_key = "env:BRAVE_SEARCH_API_KEY"
+  ```
+</ParamField>
+
+## Timezone Settings
+
+<ParamField path="cron_timezone" type="string">
+  Timezone for cron active-hours evaluation (e.g., `America/New_York`). Falls back to `SPACEBOT_CRON_TIMEZONE` env var or system local time.
+  
+  ```toml
+  [[agents]]
+  id = "support"
+  cron_timezone = "America/New_York"
+  ```
+</ParamField>
+
+<ParamField path="user_timezone" type="string">
+  Timezone for channel/worker temporal context (e.g., `Europe/London`). Falls back to `SPACEBOT_USER_TIMEZONE` env var, `cron_timezone`, or system local time.
+  
+  ```toml
+  [[agents]]
+  id = "assistant"
+  user_timezone = "Europe/London"
+  ```
+</ParamField>
+
+## Cron Jobs
+
+<ParamField path="cron" type="array">
+  Scheduled tasks for this agent.
+  
+  <Expandable title="Cron Job Properties">
+    <ResponseField name="id" type="string" required>
+      Unique identifier for this cron job.
+    </ResponseField>
+    
+    <ResponseField name="prompt" type="string" required>
+      Task prompt sent to the agent.
+    </ResponseField>
+    
+    <ResponseField name="cron_expr" type="string">
+      Cron expression in standard 5-field format (minute hour day month weekday). Takes precedence over `interval_secs`.
+    </ResponseField>
+    
+    <ResponseField name="interval_secs" type="integer">
+      Interval in seconds between runs (used if `cron_expr` is not set).
+    </ResponseField>
+    
+    <ResponseField name="delivery_target" type="string" required>
+      Delivery target in `adapter:target` format (e.g., `discord:123456789`).
+    </ResponseField>
+    
+    <ResponseField name="active_start_hour" type="integer">
+      Start of active hours window (0-23, 24-hour format).
+    </ResponseField>
+    
+    <ResponseField name="active_end_hour" type="integer">
+      End of active hours window (0-23, 24-hour format).
+    </ResponseField>
+    
+    <ResponseField name="enabled" type="boolean" default="true">
+      Whether this cron job is enabled.
+    </ResponseField>
+    
+    <ResponseField name="run_once" type="boolean" default="false">
+      Run only once at startup, then disable.
+    </ResponseField>
+    
+    <ResponseField name="timeout_secs" type="integer" default="120">
+      Maximum wall-clock seconds to wait for job completion.
+    </ResponseField>
+  </Expandable>
+  
+  ```toml
+  [[agents]]
+  id = "monitor"
+  
+  [[agents.cron]]
+  id = "daily_summary"
+  prompt = "Generate a daily activity summary"
+  cron_expr = "0 9 * * *"  # Every day at 9 AM
+  delivery_target = "discord:987654321"
+  active_start_hour = 8
+  active_end_hour = 18
+  ```
+</ParamField>
+
+## Examples
+
+### Basic Agent
+
+```toml
+[[agents]]
+id = "main"
+default = true
+display_name = "Main Assistant"
+role = "General purpose assistant"
+```
+
+### Agent with Custom Routing
+
+```toml
+[[agents]]
+id = "coding"
+display_name = "Code Assistant"
+role = "Handles coding tasks"
+
+[agents.routing]
+worker = "anthropic/claude-sonnet-4"
+branch = "anthropic/claude-sonnet-4"
+
+[agents.routing.task_overrides]
+coding = "anthropic/claude-sonnet-4"
+```
+
+### Agent with High Concurrency
+
+```toml
+[[agents]]
+id = "research"
+display_name = "Research Bot"
+max_concurrent_branches = 20
+max_concurrent_workers = 10
+branch_max_turns = 100
+```
+
+### Agent with Custom Workspace
+
+```toml
+[[agents]]
+id = "dev"
+display_name = "Dev Assistant"
+workspace = "/home/user/projects/dev-workspace"
+brave_search_key = "env:BRAVE_SEARCH_API_KEY"
+
+[[agents.mcp]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"]
+```
+
+### Agent with Scheduled Tasks
+
+```toml
+[[agents]]
+id = "monitor"
+display_name = "System Monitor"
+cron_timezone = "America/New_York"
+
+[[agents.cron]]
+id = "hourly_check"
+prompt = "Check system status and report any issues"
+interval_secs = 3600
+delivery_target = "discord:123456789"
+active_start_hour = 8
+active_end_hour = 18
+
+[[agents.cron]]
+id = "daily_summary"
+prompt = "Generate daily activity summary"
+cron_expr = "0 17 * * *"  # 5 PM every day
+delivery_target = "discord:123456789"
+```

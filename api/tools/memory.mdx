@@ -1,0 +1,280 @@
+---
+title: Memory Tools
+description: Tools for saving, recalling, and deleting memories in the knowledge graph
+---
+
+Memory tools provide persistent knowledge storage with hybrid search (semantic + keyword + graph). Available to branches, the cortex, and compaction workers.
+
+## memory_save
+
+Write a new memory to the store. Memories are automatically embedded, indexed for search, and linked to similar existing memories.
+
+<ParamField path="content" type="string" required>
+  The memory content to save. Be concise but complete. Maximum 50,000 bytes.
+</ParamField>
+
+<ParamField path="memory_type" type="string" default="fact">
+  The type of memory being saved:
+  - `fact`: Factual information
+  - `preference`: User preferences or style choices
+  - `decision`: Decisions made during conversations
+  - `identity`: Core identity information (exempt from decay)
+  - `event`: Specific events or happenings
+  - `observation`: Patterns or insights observed
+  - `goal`: Goals or objectives
+  - `todo`: Action items or tasks
+</ParamField>
+
+<ParamField path="importance" type="number">
+  Optional importance score (0.0-1.0). Higher values are recalled more easily. If not provided, uses type-specific defaults.
+  
+  Default importance by type:
+  - identity: 1.0
+  - decision: 0.8
+  - preference: 0.7
+  - goal: 0.7
+  - fact: 0.5
+  - event: 0.5
+  - observation: 0.4
+  - todo: 0.3
+</ParamField>
+
+<ParamField path="source" type="string">
+  Optional source information describing where this memory came from. Examples:
+  - "user stated explicitly"
+  - "inferred from conversation"
+  - "system observation"
+  - "external research"
+</ParamField>
+
+<ParamField path="channel_id" type="string">
+  Optional channel ID to associate this memory with the conversation it came from. Helps with context-aware recall.
+</ParamField>
+
+<ParamField path="associations" type="array">
+  Optional associations to link this memory to other memories in the graph. Each association includes:
+  
+  - `target_id` (string, required): The memory ID to link to
+  - `relation_type` (string): Type of relationship
+    - `related_to`: General relationship (default)
+    - `updates`: This memory updates or supersedes the target
+    - `contradicts`: This memory contradicts the target
+    - `caused_by`: This memory resulted from the target
+    - `result_of`: This memory is a result of the target
+    - `part_of`: This memory is part of a larger target memory
+  - `weight` (number): Strength of association 0.0-1.0 (default: 0.5)
+</ParamField>
+
+<ResponseField name="memory_id" type="string">
+  The UUID of the saved memory
+</ResponseField>
+
+<ResponseField name="success" type="boolean">
+  Whether the save was successful
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message ("Memory saved successfully")
+</ResponseField>
+
+### Example: Simple fact
+
+```json
+{
+  "content": "The user's production API uses exponential backoff with max 5 retry attempts for failed requests",
+  "memory_type": "fact",
+  "importance": 0.6,
+  "source": "user stated during debugging session"
+}
+```
+
+### Example: Preference with high importance
+
+```json
+{
+  "content": "User strongly prefers TypeScript over JavaScript for all new projects. Values type safety and IDE autocomplete.",
+  "memory_type": "preference",
+  "importance": 0.9,
+  "source": "user stated multiple times"
+}
+```
+
+### Example: Decision with association
+
+```json
+{
+  "content": "Decided to migrate from REST to GraphQL for the mobile API. Implementation starts Q2 2026.",
+  "memory_type": "decision",
+  "importance": 0.8,
+  "source": "team meeting conclusion",
+  "associations": [
+    {
+      "target_id": "prev-discussion-memory-id",
+      "relation_type": "result_of",
+      "weight": 0.9
+    }
+  ]
+}
+```
+
+<Info>
+**Automatic similarity linking**: When saving, memories with >0.9 similarity to existing memories are automatically linked with an `updates` relationship. This helps track evolving information.
+</Info>
+
+<Note>
+**Identity memories** never decay. They maintain full importance indefinitely and remain permanently accessible for recall.
+</Note>
+
+---
+
+## memory_recall
+
+Search and retrieve memories using hybrid search that combines semantic similarity, full-text keyword matching, and graph traversal. Results are automatically curated and ranked.
+
+<ParamField path="query" type="string">
+  Search query for hybrid mode. Required for hybrid mode, ignored for other modes.
+  
+  For best results:
+  - Be specific about what you're looking for
+  - Use natural language questions or descriptions
+  - Include context words that might appear in the memory
+</ParamField>
+
+<ParamField path="max_results" type="integer" default={10}>
+  Maximum number of memories to return (1-50)
+</ParamField>
+
+<ParamField path="memory_type" type="string">
+  Filter to a specific memory type. Required for "typed" mode, optional filter for other modes.
+  
+  Valid types: `fact`, `preference`, `decision`, `identity`, `event`, `observation`, `goal`, `todo`
+</ParamField>
+
+<ParamField path="mode" type="string" default="hybrid">
+  Search mode:
+  - `"hybrid"`: Combines semantic similarity, keyword matching, and graph traversal using Reciprocal Rank Fusion (RRF). Requires a query. **Recommended for most use cases.**
+  - `"recent"`: Most recent memories by creation time. No query needed.
+  - `"important"`: Highest importance scores. No query needed.
+  - `"typed"`: Filter by memory_type. Requires memory_type parameter.
+</ParamField>
+
+<ParamField path="sort_by" type="string" default="recent">
+  Sort order for non-hybrid modes:
+  - `"recent"`: Most recent first
+  - `"importance"`: Highest importance first
+  - `"most_accessed"`: Most frequently accessed first
+</ParamField>
+
+<ResponseField name="memories" type="array">
+  Array of memory objects. Each memory includes:
+  - `id` (string): Memory UUID
+  - `content` (string): Memory content
+  - `memory_type` (string): Type of memory
+  - `importance` (number): Importance score 0.0-1.0
+  - `created_at` (string): ISO 8601 timestamp
+  - `relevance_score` (number): Relevance to the query (0.0-1.0)
+</ResponseField>
+
+<ResponseField name="total_found" type="integer">
+  Total number of results found before curation and max_results limit
+</ResponseField>
+
+<ResponseField name="summary" type="string">
+  Formatted markdown summary of the memories for easy LLM consumption
+</ResponseField>
+
+### Example: Hybrid search (recommended)
+
+```json
+{
+  "query": "what are the user's preferences for code style and formatting?",
+  "max_results": 10,
+  "mode": "hybrid"
+}
+```
+
+### Example: Recent decisions
+
+```json
+{
+  "memory_type": "decision",
+  "mode": "typed",
+  "sort_by": "recent",
+  "max_results": 15
+}
+```
+
+### Example: Most important memories of any type
+
+```json
+{
+  "mode": "important",
+  "max_results": 20
+}
+```
+
+### Example: Identity memories
+
+```json
+{
+  "memory_type": "identity",
+  "mode": "typed",
+  "max_results": 50
+}
+```
+
+<Tip>
+**Access tracking**: Every recall automatically updates the access timestamp and access count for retrieved memories. Frequently accessed memories gain importance over time.
+</Tip>
+
+<Info>
+**Hybrid search algorithm**: Combines three retrieval methods using Reciprocal Rank Fusion:
+1. **Vector similarity**: Semantic search using embeddings (finds conceptually similar memories)
+2. **Full-text search**: Tantivy-based keyword matching (finds exact phrases)
+3. **Graph traversal**: Follows associations from initial results (finds related memories)
+
+Final score: `sum(1/(60 + rank))` for each source
+</Info>
+
+---
+
+## memory_delete
+
+Soft-delete a memory by marking it as forgotten. The memory stays in the database but is excluded from all search and recall operations.
+
+<ParamField path="memory_id" type="string" required>
+  The ID of the memory to forget (from memory_recall results)
+</ParamField>
+
+<ParamField path="reason" type="string">
+  Brief reason for forgetting this memory (for audit purposes). Logged but not shown to users.
+</ParamField>
+
+<ResponseField name="forgotten" type="boolean">
+  Whether the memory was found and forgotten
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Description of what happened, including a preview of the forgotten memory
+</ResponseField>
+
+### Example
+
+```json
+{
+  "memory_id": "550e8400-e29b-41d4-a716-446655440000",
+  "reason": "Information is outdated, user confirmed new approach"
+}
+```
+
+<Warning>
+Memory deletion is **soft deletion**. The memory remains in the database for audit purposes but won't appear in searches. This is intentional to maintain a complete history.
+</Warning>
+
+<Note>
+Use `memory_delete` when:
+- Information becomes outdated and `updates` associations aren't sufficient
+- A memory contains incorrect information
+- A user explicitly requests forgetting something
+- A memory contradicts newer, more authoritative information
+</Note>

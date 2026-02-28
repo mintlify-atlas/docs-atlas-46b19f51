@@ -1,0 +1,439 @@
+---
+title: Context Compaction
+description: Automatic background compaction keeps channels responsive
+---
+
+The compactor watches each channel's context size and triggers background compaction before the channel fills up. The channel never blocks on compaction — it keeps responding to users while old context is summarized in the background.
+
+## Not an LLM Process
+
+The compactor is **not** an LLM process. It's a programmatic monitor that watches a number (context token count) and spawns workers when thresholds are crossed.
+
+```rust
+// From src/agent/compactor.rs
+pub struct Compactor {
+    pub channel_id: ChannelId,
+    pub deps: AgentDeps,
+    pub history: Arc<RwLock<Vec<Message>>>,
+    is_compacting: Arc<RwLock<bool>>,
+}
+```
+
+The LLM work (summarization + memory extraction) happens in the **compaction worker** it spawns, not in the compactor itself.
+
+## Tiered Thresholds
+
+The compactor uses three thresholds:
+
+```toml
+[defaults.compaction]
+background_threshold = 0.80  # 80% context usage
+aggressive_threshold = 0.85  # 85% context usage
+emergency_threshold = 0.95   # 95% context usage
+```
+
+### Background Compaction (>80%)
+
+Summarize oldest 30% of messages:
+
+```rust
+// From src/agent/compactor.rs
+let fraction = 0.3;
+let compaction_worker = spawn_compaction_worker(fraction);
+```
+
+The worker:
+1. Reads the oldest 30% of messages
+2. Uses an LLM to summarize them
+3. Extracts any memorable facts, decisions, preferences
+4. Saves extracted memories to the memory graph
+5. Replaces original messages with a summary
+
+### Aggressive Compaction (>85%)
+
+Summarize oldest 50% of messages:
+
+```rust
+let fraction = 0.5;
+```
+
+Same process, more aggressive. Fires when background compaction didn't reclaim enough space.
+
+### Emergency Truncation (>95%)
+
+Drop oldest messages **without LLM summarization**:
+
+```rust
+// From src/agent/compactor.rs
+async fn emergency_truncate(&self) -> Result<()> {
+    let mut history = self.history.write().await;
+    let cutoff = history.len() / 2;
+    
+    history.splice(
+        0..cutoff,
+        vec![Message::assistant(
+            "[Emergency truncation: oldest messages removed to prevent overflow]"
+        )]
+    );
+    
+    Ok(())
+}
+```
+
+Fast and synchronous. Only fires when context is critically full and background compaction hasn't completed yet.
+
+## Compaction Flow
+
+<Steps>
+  <Step title="Channel completes a turn">
+    After the channel finishes processing a user message, it calls the compactor.
+  </Step>
+  
+  <Step title="Compactor checks context size">
+    ```rust
+    // From src/agent/compactor.rs
+    let context_window = **rc.context_window.load();
+    let usage = estimated_tokens as f32 / context_window as f32;
+    ```
+  </Step>
+  
+  <Step title="Threshold check">
+    ```rust
+    let action = if usage >= config.emergency_threshold {
+        Some(CompactionAction::EmergencyTruncate)
+    } else if usage >= config.aggressive_threshold {
+        Some(CompactionAction::Aggressive)
+    } else if usage >= config.background_threshold {
+        Some(CompactionAction::Background)
+    } else {
+        None
+    };
+    ```
+  </Step>
+  
+  <Step title="Spawn compaction worker (or emergency truncate)">
+    Emergency truncation is synchronous and fast. Background and aggressive spawn a worker.
+    
+    ```rust
+    tokio::spawn(async move {
+        let result = run_compaction(&deps, &prompt, &history, fraction).await;
+    });
+    ```
+  </Step>
+  
+  <Step title="Worker summarizes and extracts">
+    The compaction worker:
+    - Reads old messages
+    - Summarizes them into a cohesive narrative
+    - Extracts memories using `memory_save` tool
+    - Returns summary
+  </Step>
+  
+  <Step title="Summary swaps into history">
+    ```rust
+    let mut history = self.history.write().await;
+    history.splice(
+        0..compacted_count,
+        vec![Message::assistant(summary)]
+    );
+    ```
+    
+    The channel sees the summary on its next turn.
+  </Step>
+</Steps>
+
+## Compaction Worker Prompt
+
+The compaction worker gets a focused system prompt:
+
+```markdown
+You are a compaction worker.
+
+Your job:
+1. Summarize the provided conversation turns into a cohesive narrative
+2. Extract any memorable facts, decisions, or preferences
+3. Save them using memory_save
+
+Guidelines:
+- Preserve important context
+- Maintain chronological flow
+- Don't lose critical information
+- Extract structured memories for anything worth remembering
+```
+
+The worker has access to:
+- `memory_save` — Create typed memories
+- No other tools (no shell, file, exec)
+
+## Token Estimation
+
+Context size is estimated using a simple heuristic:
+
+```rust
+// From src/agent/compactor.rs
+pub fn estimate_history_tokens(history: &[Message]) -> usize {
+    history.iter().map(|msg| {
+        match msg {
+            Message::User { content, .. } => estimate_content_tokens(content),
+            Message::Assistant { content, .. } => estimate_content_tokens(content),
+            Message::ToolCall { .. } => 50,  // Approximate
+            Message::ToolResult { .. } => 100,
+        }
+    }).sum()
+}
+
+fn estimate_content_tokens(content: &str) -> usize {
+    // Rough approximation: 1 token ≈ 4 characters
+    content.len() / 4
+}
+```
+
+This is deliberately conservative. Better to compact slightly early than overflow.
+
+## Compaction Lock
+
+Only one compaction runs per channel at a time:
+
+```rust
+// From src/agent/compactor.rs
+is_compacting: Arc<RwLock<bool>>
+
+async fn spawn_compaction_worker(&self, action: CompactionAction) {
+    let mut is_compacting = self.is_compacting.write().await;
+    *is_compacting = true;
+    drop(is_compacting);
+    
+    tokio::spawn(async move {
+        // ... compaction work ...
+        
+        let mut flag = is_compacting.write().await;
+        *flag = false;
+    });
+}
+```
+
+If compaction is already running, new checks are skipped.
+
+## Summary Stacking
+
+Multiple compactions stack chronologically:
+
+```
+[Summary 1: turns 1-50]
+[Summary 2: turns 51-100]
+[Summary 3: turns 101-150]
+[Turn 151]
+[Turn 152]
+...
+```
+
+Eventually, old summaries themselves get compacted into meta-summaries.
+
+## Memory Extraction
+
+During compaction, the worker extracts memories:
+
+```json
+{
+  "name": "memory_save",
+  "input": {
+    "content": "User decided to refactor the auth module to use dependency injection",
+    "memory_type": "decision",
+    "importance": 0.8
+  }
+}
+```
+
+This ensures context that gets summarized away is preserved as structured knowledge.
+
+## Context Window Configuration
+
+Per-agent context window:
+
+```toml
+[defaults]
+context_window = 200000  # 200k tokens (Claude Sonnet/Opus)
+
+[defaults.compaction]
+background_threshold = 0.80
+aggressive_threshold = 0.85
+emergency_threshold = 0.95
+```
+
+For smaller models:
+
+```toml
+[defaults]
+context_window = 128000  # 128k tokens
+
+[defaults.compaction]
+background_threshold = 0.70  # Compact earlier
+aggressive_threshold = 0.80
+emergency_threshold = 0.90
+```
+
+## Branch Compaction
+
+Branches inherit large channel histories and can overflow on first call. They have built-in pre-flight compaction:
+
+```rust
+// From src/agent/branch.rs
+self.maybe_compact_history();
+
+fn maybe_compact_history(&mut self) {
+    let estimated = estimate_history_tokens(&self.history);
+    let context_window = **self.deps.runtime_config.context_window.load();
+    let usage = estimated as f32 / context_window as f32;
+    
+    if usage > 0.6 {
+        self.force_compact_history();
+    }
+}
+```
+
+If a branch overflows despite this, it retries with compaction:
+
+```rust
+const MAX_OVERFLOW_RETRIES: usize = 2;
+
+match agent.prompt(&prompt).await {
+    Err(error) if is_context_overflow_error(&error.to_string()) => {
+        self.force_compact_history();
+        current_prompt = "Continue where you left off. Older context has been compacted.";
+    }
+}
+```
+
+## Worker Compaction
+
+Workers run in segments and compact between segments:
+
+```rust
+// From src/agent/worker.rs
+const TURNS_PER_SEGMENT: usize = 25;
+
+// After 25 turns
+let estimated = estimate_history_tokens(&history);
+if estimated as f32 / context_window as f32 > 0.7 {
+    compact_worker_history(&mut history);
+}
+```
+
+Worker compaction is simpler than channel compaction — just drop oldest tool calls and keep only the task description + recent turns.
+
+## Compaction Observability
+
+Compaction events are logged:
+
+```rust
+tracing::info!(
+    channel_id = %self.channel_id,
+    usage = %format!("{:.1}%", usage * 100.0),
+    ?action,
+    "compaction triggered"
+);
+```
+
+On completion:
+
+```rust
+tracing::info!(
+    channel_id = %channel_id,
+    turns_compacted = turns_compacted,
+    "compaction completed"
+);
+```
+
+On failure:
+
+```rust
+tracing::error!(
+    channel_id = %channel_id,
+    %error,
+    "compaction failed"
+);
+```
+
+## Error Handling
+
+If compaction fails:
+
+1. **Background/aggressive compaction** — Logged, compaction lock released, channel continues normally
+2. **Emergency truncation** — Always succeeds (synchronous drop)
+
+The channel is never blocked by compaction failures. Worst case: emergency truncation kicks in and drops old messages without summarization.
+
+## Best Practices
+
+<Accordion title="When to adjust thresholds">
+  **Lower thresholds (compact earlier):**
+  - Small context window models (less than 128k tokens)
+  - Very active channels with rapid message flow
+  - You want more aggressive memory extraction
+  
+  **Higher thresholds (compact later):**
+  - Large context window models (200k+ tokens)
+  - Slow-moving conversations
+  - You want to preserve more raw context
+</Accordion>
+
+<Accordion title="How to tune compaction aggressiveness">
+  **Conservative (preserve more context):**
+  ```toml
+  [defaults.compaction]
+  background_threshold = 0.85
+  aggressive_threshold = 0.90
+  emergency_threshold = 0.95
+  ```
+  
+  **Aggressive (compact earlier):**
+  ```toml
+  [defaults.compaction]
+  background_threshold = 0.70
+  aggressive_threshold = 0.80
+  emergency_threshold = 0.90
+  ```
+</Accordion>
+
+<Accordion title="When to use emergency truncation">
+  Emergency truncation is a safety valve. It fires when:
+  - Context is critically full (>95%)
+  - Background compaction hasn't completed yet
+  - The next user message would overflow
+  
+  If you're hitting emergency truncation frequently:
+  - Lower background/aggressive thresholds
+  - Increase context window
+  - Check if compaction workers are failing
+</Accordion>
+
+## Compaction vs Memory
+
+Compaction and memory are complementary:
+
+**Compaction** — Manages context window size. Summarizes old messages. Runs automatically.
+
+**Memory** — Extracts structured knowledge. Stores facts, preferences, decisions. Queried by branches.
+
+During compaction, both happen:
+1. Messages are summarized (compaction)
+2. Important facts are extracted as typed memories (memory)
+
+The summary keeps context coherent. The memories make knowledge queryable.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Memory System" icon="brain" href="/core/memory">
+    Learn how compaction extracts memories
+  </Card>
+  <Card title="Branches" icon="code-branch" href="/core/agents#branches">
+    See how branches handle context overflow
+  </Card>
+  <Card title="Workers" icon="hammer" href="/core/agents#workers">
+    Understand worker segmentation and compaction
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/config">
+    Full compaction configuration reference
+  </Card>
+</CardGroup>

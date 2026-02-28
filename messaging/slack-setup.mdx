@@ -1,0 +1,222 @@
+---
+title: Slack Setup
+description: Connect Spacebot to Slack workspaces with Socket Mode, Block Kit, and slash commands.
+---
+
+Connect Spacebot to your Slack workspace. Takes about 5 minutes.
+
+You need two tokens from a Slack app: a **Bot Token** (`xoxb-...`) and an **App Token** (`xapp-...`).
+
+## Step 1: Create a Slack App
+
+<Steps>
+  <Step title="Create the App">
+    Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**.
+    
+    Name it whatever you want and select your workspace.
+  </Step>
+
+  <Step title="Enable Socket Mode">
+    In your Slack app settings, go to **Socket Mode** and **toggle it on**.
+    
+    You'll be prompted to create an **App-Level Token**. Give it a name (e.g., "spacebot") and add the `connections:write` scope. Click **Generate**.
+    
+    Copy the token — this is your **App Token**.
+  </Step>
+
+  <Step title="Verify Token Format">
+    <Warning>
+    The App Token **must** start with `xapp-`. If yours starts with `app-` you have the wrong value. Go to **Basic Information** → **App-Level Tokens** and copy or regenerate the `xapp-` prefixed one.
+    </Warning>
+  </Step>
+</Steps>
+
+## Step 2: Add Bot Scopes
+
+In your Slack app settings, go to **OAuth & Permissions** → scroll to **Bot Token Scopes** → add all of:
+
+| Scope | What it's for |
+|-------|---------------|
+| `chat:write` | Send and edit messages |
+| `reactions:write` | Thinking indicator |
+| `reactions:read` | Read reactions |
+| `channels:history` | Read message history in public channels |
+| `channels:read` | Read public channel metadata (for channel names) |
+| `groups:history` | Same, for private channels |
+| `groups:read` | Read private channel metadata (for channel names) |
+| `im:history` | Same, for DMs |
+| `im:read` | Read DM metadata (for conversation names) |
+| `mpim:history` | Same, for group DMs |
+| `mpim:read` | Read group DM metadata (for conversation names) |
+| `users:read` | Resolve display names |
+| `files:write` | Upload file attachments |
+| `files:read` | Read file metadata |
+
+## Step 3: Subscribe to Events
+
+In your Slack app settings, go to **Event Subscriptions** and make sure it's toggled on. Under **Subscribe to bot events**, verify these are listed (add any that are missing):
+
+- `message.channels` — public channels
+- `message.groups` — private channels
+- `message.im` — DMs
+- `message.mpim` — group DMs
+
+These tell Slack which message events to send to Spacebot. Without them, the bot won't see messages in the corresponding channel types.
+
+## Step 4: Install to Workspace
+
+<Steps>
+  <Step title="Install the App">
+    In your Slack app settings, go to **Install App** → **Install to Workspace** → Authorize.
+    
+    Copy the **Bot User OAuth Token** — this is your **Bot Token**. It starts with `xoxb-`.
+  </Step>
+
+  <Step title="Invite the Bot">
+    In Slack, go to any channel you want the bot in and run `/invite @YourBotName`.
+  </Step>
+</Steps>
+
+## Step 5: Add Tokens to Spacebot
+
+<Tabs>
+  <Tab title="TOML Config">
+    ```toml config.toml
+    [messaging.slack]
+    enabled = true
+    bot_token = "xoxb-your-bot-token"
+    app_token = "xapp-your-app-token"
+
+    [[bindings]]
+    agent_id = "main"
+    channel = "slack"
+    ```
+
+    You can also reference environment variables:
+
+    ```toml config.toml
+    [messaging.slack]
+    enabled = true
+    bot_token = "env:SLACK_BOT_TOKEN"
+    app_token = "env:SLACK_APP_TOKEN"
+    ```
+
+    Token changes in config require a restart.
+  </Tab>
+</Tabs>
+
+## Verify It's Working
+
+Send a message in one of the channels you invited the bot to. You should see:
+
+1. A 🤔 reaction appear while it processes
+2. A reply from the bot
+
+The reaction is removed once the response is complete.
+
+## Filtering
+
+### Restrict to Specific Channels
+
+By default the bot responds in every channel it's been invited to. To limit it, add channel IDs to your binding.
+
+```toml config.toml
+[[bindings]]
+agent_id = "main"
+channel = "slack"
+workspace_id = "T01234ABCDE"
+channel_ids = ["C0001", "C0002"]
+```
+
+### Finding Your Workspace ID
+
+The workspace ID is the `T`-prefixed string in your Slack URL:
+
+```
+https://app.slack.com/client/T01234ABCDE/...
+                            ^^^^^^^^^^^^
+```
+
+### DM Filtering
+
+By default, all DMs are ignored. To allow specific users, add their Slack user IDs.
+
+```toml config.toml
+[messaging.slack]
+dm_allowed_users = ["U01234", "U56789"]
+```
+
+Permission changes hot-reload within a couple seconds — no restart needed.
+
+## Slash Commands
+
+You can route Slack slash commands to specific agents.
+
+<Steps>
+  <Step title="Create a Slash Command">
+    In your Slack app settings, go to **Slash Commands** → **Create New Command**.
+    
+    - **Command:** `/ask` (or any name)
+    - **Request URL:** Leave this empty (Socket Mode handles it)
+    - **Short Description:** "Ask the AI agent"
+  </Step>
+
+  <Step title="Configure Routing">
+    ```toml config.toml
+    [[messaging.slack.commands]]
+    command = "/ask"
+    agent_id = "main"
+    
+    [[messaging.slack.commands]]
+    command = "/support"
+    agent_id = "support-bot"
+    ```
+  </Step>
+</Steps>
+
+When a user types `/ask question here`, Spacebot routes it to the `main` agent.
+
+## Rich Messages
+
+Slack supports rich message features:
+
+### Block Kit
+
+Structured messages with sections, dividers, buttons, and select menus. Spacebot automatically converts `OutboundResponse::RichMessage` to Block Kit layout.
+
+### Ephemeral Messages
+
+Send messages visible only to the triggering user with `OutboundResponse::Ephemeral`. Useful for confirmations or error messages.
+
+### Scheduled Messages
+
+Schedule messages for future delivery with `OutboundResponse::ScheduledMessage`. Uses Slack's native `chat.scheduleMessage` API.
+
+## Threads
+
+Threads get their own separate conversation with isolated history. Messages in the main channel share one conversation.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `invalid_auth` on startup | Wrong app token | Must start with `xapp-`, not `app-` |
+| `invalid_auth` on API calls | Wrong bot token | Reinstall app, copy fresh `xoxb-` token |
+| Connects then immediately drops | Socket Mode not enabled | Slack app settings → Socket Mode → toggle on |
+| Bot doesn't respond in channel | Not invited | `/invite @YourBot` in the channel |
+| Bot doesn't respond to DMs | DM filtering | Add user ID to `dm_allowed_users` |
+| Slash command doesn't work | Not configured | Add command to `messaging.slack.commands` array |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configure Permissions" icon="shield" href="/configuration/permissions">
+    Set up workspace and channel filters
+  </Card>
+  <Card title="Slash Commands" icon="command" href="/messaging/slack-setup#slash-commands">
+    Route commands to different agents
+  </Card>
+  <Card title="Block Kit Messages" icon="th-large" href="/features/tools">
+    Send rich interactive messages
+  </Card>
+</CardGroup>

@@ -1,0 +1,186 @@
+---
+title: Spacebot
+description: An AI agent framework for teams, communities, and multi-user environments. Thinks, executes, and responds — concurrently, not sequentially.
+---
+
+<img src="https://raw.githubusercontent.com/spacedriveapp/spacebot/main/.github/Ball.png" alt="Spacebot" width="120" height="120" />
+
+# Spacebot
+
+An AI agent for teams, communities, and multi-user environments. Thinks, executes, and responds — concurrently, not sequentially. Never blocks. Never forgets.
+
+## The Problem
+
+Most AI agent frameworks run everything in a single session. One LLM thread handles conversation, thinking, tool execution, memory retrieval, and context compaction — all in one loop. When it's doing work, it can't talk to you. When it's compacting, it goes dark. When it retrieves memories, raw results pollute the context with noise.
+
+**Spacebot splits the monolith into specialized processes that only do one thing, and delegate everything else.**
+
+## Built for Teams and Communities
+
+Most AI agents are built for one person in one conversation. Spacebot is built for many people working together — a Discord community with hundreds of active members, a Slack workspace with teams running parallel workstreams, a Telegram group coordinating across time zones.
+
+<Note>
+A single-threaded agent breaks the moment two people talk at once. Spacebot's delegation model means it can think about User A's question, execute a task for User B, and respond to User C's small talk — all at the same time, without any of them waiting on each other.
+</Note>
+
+**For communities** — Drop Spacebot into a Discord server. It handles concurrent conversations across channels and threads, remembers context about every member, and does real work (code, research, file operations) without going dark. Fifty people can interact with it simultaneously.
+
+**For teams** — Connect it to Slack. Each channel gets a dedicated conversation with shared memory. Spacebot can run long coding sessions for one engineer while answering quick questions from another. Workers handle the heavy lifting in the background while the channel stays responsive.
+
+**For multi-agent setups** — Run multiple agents on one instance. A community bot with a friendly personality on Discord, a no-nonsense dev assistant on Slack, and a research agent handling background tasks. Each with its own identity, memory, and security permissions. One binary, one deploy.
+
+## Deploy Your Way
+
+<CardGroup cols={3}>
+  <Card title="spacebot.sh" icon="globe" href="https://spacebot.sh">
+    One-click hosted deploy. Connect your platforms, configure your agent, done.
+  </Card>
+  <Card title="Self-hosted" icon="server" href="/quickstart">
+    Single Rust binary. No Docker, no server dependencies, no microservices. Clone, build, run.
+  </Card>
+  <Card title="Docker" icon="docker" href="/docker">
+    Container image with everything included. Mount a volume for persistent data.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+Five process types. Each does one job.
+
+### Channels
+
+The user-facing LLM process — the ambassador to the human. One per conversation (Discord thread, Slack channel, Telegram DM, etc). Has soul, identity, and personality. Talks to the user. Delegates everything else.
+
+A channel does **not**: execute tasks directly, search memories itself, or do any heavy tool work. It is always responsive — never blocked by work, never frozen by compaction.
+
+When it needs to think, it branches. When it needs work done, it spawns a worker.
+
+### Branches
+
+A fork of the channel's context that goes off to think. Has the channel's full conversation history — same context, same memories, same understanding. Operates independently. The channel never sees the working, only the conclusion.
+
+```
+User A: "what do you know about X?"
+    → Channel branches (branch-1)
+
+User B: "hey, how's it going?"
+    → Channel responds directly: "Going well! Working on something for A."
+
+Branch-1 resolves: "Here's what I found about X: [curated memories]"
+    → Channel sees the branch result on its next turn
+    → Channel responds to User A with the findings
+```
+
+Multiple branches run concurrently. First done, first incorporated. Each branch forks from the channel's context at creation time, like a git branch.
+
+### Workers
+
+Independent processes that do jobs. Get a specific task, a focused system prompt, and task-appropriate tools. No channel context, no soul, no personality.
+
+**Fire-and-forget** — do a job and return a result. Summarization, file operations, one-shot tasks.
+
+**Interactive** — long-running, accept follow-up input from the channel. Coding sessions, multi-step tasks.
+
+```
+User: "refactor the auth module"
+    → Branch spawns interactive coding worker
+    → Branch returns: "Started a coding session for the auth refactor"
+
+User: "actually, update the tests too"
+    → Channel routes message to active worker
+    → Worker receives follow-up, continues with its existing context
+```
+
+### The Compactor
+
+Not an LLM process. A programmatic monitor per channel that watches context size and triggers compaction before the channel fills up.
+
+| Threshold | Action                                       |
+| --------- | -------------------------------------------- |
+| **>80%**  | Background compaction (summarize oldest 30%) |
+| **>85%**  | Aggressive compaction (summarize oldest 50%) |
+| **>95%**  | Emergency truncation (hard drop, no LLM)     |
+
+Compaction workers run alongside the channel without blocking it. Summaries stack chronologically at the top of the context window.
+
+### The Cortex
+
+The agent's inner monologue. The only process that sees across all channels, workers, and branches simultaneously. Generates a **memory bulletin** — a periodically refreshed, LLM-curated briefing of the agent's knowledge injected into every conversation. Supervises running processes (kills hanging workers, cleans up stale branches). Maintains the memory graph (decay, pruning, merging near-duplicates, cross-channel consolidation).
+
+## Capabilities
+
+<CardGroup cols={2}>
+  <Card title="Task Execution" icon="terminal">
+    Workers come loaded with tools for real work:
+    - **Shell** — run arbitrary commands with configurable timeouts
+    - **File** — read, write, and list files with auto-created directories
+    - **Exec** — run specific programs with arguments and environment variables
+    - **OpenCode** — spawn a full coding agent as a persistent worker
+    - **Browser** — headless Chrome automation with accessibility-tree navigation
+    - **Brave Search** — web search with freshness filters and localization
+  </Card>
+  
+  <Card title="Messaging" icon="comments">
+    Native adapters for Discord, Slack, Telegram, Twitch, and Webchat:
+    - **Message coalescing** — rapid-fire messages batched into single LLM turn
+    - **File attachments** — send and receive files, images, and documents
+    - **Rich messages** — embeds/cards, interactive buttons, select menus
+    - **Threading** — automatic thread creation for long conversations
+    - **Reactions** — emoji reactions on messages
+    - **Per-channel permissions** — guild, channel, and DM-level access control
+  </Card>
+  
+  <Card title="Memory System" icon="brain">
+    Not markdown files. Not unstructured blocks in a vector database. Spacebot's memory is a typed, graph-connected knowledge system:
+    - **Eight memory types** — Fact, Preference, Decision, Identity, Event, Observation, Goal, Todo
+    - **Graph edges** — RelatedTo, Updates, Contradicts, CausedBy, PartOf
+    - **Hybrid recall** — vector similarity + full-text search merged via Reciprocal Rank Fusion
+    - **Memory import** — dump files into `ingest/` folder for automatic extraction
+    - **Cross-channel recall** — branches can read transcripts from other conversations
+  </Card>
+  
+  <Card title="Model Routing" icon="route">
+    Four-level routing system that picks the right model for every LLM call:
+    - **Process-type defaults** — channels get the best conversational model
+    - **Task-type overrides** — coding workers upgrade to stronger models
+    - **Prompt complexity scoring** — lightweight scorer downgrades simple requests
+    - **Fallback chains** — 429/502 errors automatically try next model
+    - **Per-agent routing profiles** — eco, balanced, or premium presets
+  </Card>
+</CardGroup>
+
+## Tech Stack
+
+| Layer           | Technology                                                                                                      |
+| --------------- | --------------------------------------------------------------------------------------------------------------- |
+| Language        | **Rust** (edition 2024)                                                                                         |
+| Async runtime   | **Tokio**                                                                                                       |
+| LLM framework   | **[Rig](https://github.com/0xPlaygrounds/rig)** v0.30 — agentic loop, tool execution, hooks                     |
+| Relational data | **SQLite** (sqlx) — conversations, memory graph, cron jobs                                                      |
+| Vector + FTS    | **[LanceDB](https://lancedb.github.io/lancedb/)** — embeddings (HNSW), full-text (Tantivy), hybrid search (RRF) |
+| Key-value       | **[redb](https://github.com/cberner/redb)** — settings, encrypted secrets                                       |
+| Embeddings      | **FastEmbed** — local embedding generation                                                                      |
+| Crypto          | **AES-256-GCM** — secret encryption at rest                                                                     |
+
+No server dependencies. Single binary. All data lives in embedded databases in a local directory.
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get Spacebot running locally in under 5 minutes
+  </Card>
+  <Card title="Docker Deployment" icon="docker" href="/docker">
+    Run Spacebot in a container with slim or full image variants
+  </Card>
+</CardGroup>
+
+## Why Rust
+
+Spacebot isn't a chatbot — it's an orchestration layer for autonomous AI processes running concurrently, sharing memory, and delegating to each other. That's infrastructure, and infrastructure should be machine code.
+
+Rust's strict type system and compiler mean there's one correct way to express something. When multiple AI processes share mutable state and spawn tasks without human oversight, "the compiler won't let you do that" is a feature. The result is a single binary with no runtime dependencies, no garbage collector pauses, and predictable resource usage.
+
+<Info>
+License: FSL-1.1-ALv2 — [Functional Source License](https://fsl.software/), converting to Apache 2.0 after two years.
+</Info>

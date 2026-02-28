@@ -1,0 +1,372 @@
+---
+title: 'MCP Integration'
+description: 'Model Context Protocol for dynamic tool discovery'
+---
+
+Spacebot integrates with the Model Context Protocol (MCP) to dynamically discover and use tools from external servers. MCP tools are available to workers, extending their capabilities beyond built-in tools.
+
+## What is MCP?
+
+MCP (Model Context Protocol) is a standard for exposing tools to LLM agents. MCP servers:
+
+- **Expose tools** via a JSON-RPC protocol
+- **Run as subprocesses** (stdio transport) or HTTP services
+- **Provide schemas** for tool arguments
+- **Handle execution** and return results
+
+Spacebot acts as an MCP client, discovering tools from configured servers and making them available to workers.
+
+## Configuration
+
+Define MCP servers in your `agent.toml`:
+
+<Tabs>
+  <Tab title="Stdio">
+    ```toml
+    [[mcp]]
+    name = "filesystem"
+    enabled = true
+    
+    [mcp.transport]
+    type = "stdio"
+    command = "npx"
+    args = ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+    env = { HOME = "${HOME}" }  # Environment variables
+    ```
+    
+    Stdio servers communicate over stdin/stdout. Spacebot spawns the subprocess and manages the lifecycle.
+  </Tab>
+  <Tab title="HTTP">
+    ```toml
+    [[mcp]]
+    name = "remote-api"
+    enabled = true
+    
+    [mcp.transport]
+    type = "http"
+    url = "https://mcp.example.com/v1"
+    
+    [mcp.transport.headers]
+    Authorization = "Bearer ${MCP_API_KEY}"
+    X-Custom-Header = "value"
+    ```
+    
+    HTTP servers use SSE (Server-Sent Events) for bidirectional communication.
+  </Tab>
+</Tabs>
+
+<ParamField path="name" type="string" required>
+  Unique identifier for the server
+</ParamField>
+
+<ParamField path="enabled" type="boolean">
+  Whether to connect to this server at startup (default: true)
+</ParamField>
+
+<ParamField path="transport.type" type="string" required>
+  Either `stdio` or `http`
+</ParamField>
+
+### Environment Variable Interpolation
+
+Use `${VAR_NAME}` in commands, URLs, and headers:
+
+```toml
+[[mcp]]
+name = "github"
+enabled = true
+
+[mcp.transport]
+type = "http"
+url = "https://api.github.com/mcp"
+
+[mcp.transport.headers]
+Authorization = "Bearer ${GITHUB_TOKEN}"
+```
+
+Variables are resolved from the environment when the server connects.
+
+## Connection Lifecycle
+
+<Steps>
+  <Step title="Startup">
+    Enabled MCP servers connect when the agent starts.
+  </Step>
+  <Step title="Tool Discovery">
+    Spacebot calls `tools/list` to discover available tools and their schemas.
+  </Step>
+  <Step title="Registration">
+    Tools are registered with workers via `McpToolAdapter`.
+  </Step>
+  <Step title="Retry on Failure">
+    If a server fails to connect, Spacebot retries with exponential backoff (5s → 10s → 20s → 40s → 60s, max 12 attempts).
+  </Step>
+  <Step title="Runtime Updates">
+    MCP servers can notify Spacebot when their tool list changes via the `notifications/tools/list_changed` message.
+  </Step>
+</Steps>
+
+```rust src/mcp.rs
+pub async fn connect_with_retry(self: &Arc<Self>) -> bool {
+    const MAX_ATTEMPTS: usize = 12;
+    const INITIAL_DELAY_SECS: u64 = 5;
+    const MAX_DELAY_SECS: u64 = 60;
+
+    let mut delay_secs = INITIAL_DELAY_SECS;
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        match self.connect().await {
+            Ok(()) => return true,
+            Err(error) => {
+                tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+                delay_secs = (delay_secs * 2).min(MAX_DELAY_SECS);
+            }
+        }
+    }
+    false
+}
+```
+
+## Tool Invocation
+
+MCP tools appear in workers' tool lists with the server name as a prefix:
+
+```json
+{
+  "name": "filesystem__read_file",
+  "description": "Read a file from the filesystem",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "path": {"type": "string", "description": "File path"}
+    },
+    "required": ["path"]
+  }
+}
+```
+
+Workers call MCP tools like built-in tools:
+
+```json
+{
+  "name": "filesystem__read_file",
+  "arguments": {"path": "/workspace/README.md"}
+}
+```
+
+Spacebot routes the call to the MCP server, executes via `tools/call`, and returns the result.
+
+## Connection States
+
+MCP servers have four states:
+
+<CardGroup cols={2}>
+  <Card title="Connecting" icon="spinner">
+    Initial connection attempt in progress
+  </Card>
+  <Card title="Connected" icon="check">
+    Server is active, tools available
+  </Card>
+  <Card title="Failed" icon="xmark">
+    Connection failed (includes error message)
+  </Card>
+  <Card title="Disconnected" icon="plug">
+    Server was disconnected or disabled
+  </Card>
+</CardGroup>
+
+Query server status via the API:
+
+```bash
+curl http://localhost:3000/api/agents/spacebot/mcp/status
+```
+
+```json
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "enabled": true,
+      "transport": "stdio",
+      "state": "connected"
+    },
+    {
+      "name": "github",
+      "enabled": true,
+      "transport": "http",
+      "state": "failed",
+      "error": "connection refused"
+    }
+  ]
+}
+```
+
+## Runtime Management
+
+<Tabs>
+  <Tab title="Reconnect">
+    ```bash
+    curl -X POST http://localhost:3000/api/agents/spacebot/mcp/filesystem/reconnect
+    ```
+    
+    Disconnects and reconnects a server. Use this after updating server config or credentials.
+  </Tab>
+  <Tab title="Update Config">
+    Modify `agent.toml` and reload:
+    
+    ```bash
+    curl -X POST http://localhost:3000/api/agents/spacebot/reload
+    ```
+    
+    Spacebot reconciles the new config:
+    - Removed servers are disconnected
+    - New servers are connected
+    - Changed servers are reconnected
+    - Unchanged servers remain active
+  </Tab>
+</Tabs>
+
+## Security Considerations
+
+<Warning>
+  **Stdio servers inherit Spacebot's process environment.** Only `PATH` is preserved by default. Set explicit env vars in the `[mcp.transport.env]` table.
+</Warning>
+
+Stdio servers run with:
+
+```rust src/mcp.rs
+let mut child_command = tokio::process::Command::new(&command);
+child_command.env_clear();
+if let Ok(path) = std::env::var("PATH") {
+    child_command.env("PATH", path);
+}
+child_command.envs(&env);
+```
+
+This prevents leaking secrets from Spacebot's environment to MCP servers.
+
+<Note>
+  HTTP servers are responsible for their own authentication. Use `Authorization` headers for API tokens.
+</Note>
+
+## Blocked Network Access
+
+HTTP transport validates URLs to prevent SSRF (Server-Side Request Forgery):
+
+- **Private IPs** (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) are blocked
+- **Loopback** (127.0.0.0/8, ::1) is blocked
+- **Link-local** (169.254.0.0/16, fe80::/10) is blocked
+- **Cloud metadata** endpoints (169.254.169.254, metadata.google.internal) are blocked
+
+If you need to connect to a local MCP server, use stdio transport instead.
+
+## Example Servers
+
+<AccordionGroup>
+  <Accordion title="Filesystem (stdio)">
+    ```toml
+    [[mcp]]
+    name = "filesystem"
+    enabled = true
+    
+    [mcp.transport]
+    type = "stdio"
+    command = "npx"
+    args = ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+    ```
+    
+    Provides file read/write tools scoped to `/workspace`.
+  </Accordion>
+  <Accordion title="GitHub (http)">
+    ```toml
+    [[mcp]]
+    name = "github"
+    enabled = true
+    
+    [mcp.transport]
+    type = "http"
+    url = "https://api.github.com/mcp/v1"
+    
+    [mcp.transport.headers]
+    Authorization = "Bearer ${GITHUB_TOKEN}"
+    Accept = "application/json"
+    ```
+    
+    Exposes GitHub API operations as tools.
+  </Accordion>
+  <Accordion title="Database (stdio)">
+    ```toml
+    [[mcp]]
+    name = "postgres"
+    enabled = true
+    
+    [mcp.transport]
+    type = "stdio"
+    command = "npx"
+    args = ["-y", "@modelcontextprotocol/server-postgres"]
+    env = { DATABASE_URL = "${DATABASE_URL}" }
+    ```
+    
+    Provides SQL query tools.
+  </Accordion>
+</AccordionGroup>
+
+## Tool Naming Convention
+
+MCP tools are prefixed with the server name to avoid collisions:
+
+- `filesystem__read_file`
+- `filesystem__write_file`
+- `github__create_issue`
+- `postgres__query`
+
+Workers see the full tool name in their tool list. The LLM learns to use the prefix from the tool schema.
+
+## Implementation Details
+
+<CodeGroup>
+```rust Connection
+pub struct McpConnection {
+    name: String,
+    config: McpServerConfig,
+    state: RwLock<McpConnectionState>,
+    client: Mutex<Option<McpClientSession>>,
+    tools: RwLock<Vec<rmcp::model::Tool>>,
+    tool_list_changed: Arc<AtomicBool>,
+}
+```
+
+```rust Tool Adapter
+pub struct McpToolAdapter {
+    server_name: String,
+    tool: rmcp::model::Tool,
+    connection: Arc<McpConnection>,
+}
+
+impl Tool for McpToolAdapter {
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let result = self.connection.call_tool(&self.tool.name, args).await?;
+        // Convert rmcp::model::CallToolResult to ToolOutput
+    }
+}
+```
+</CodeGroup>
+
+MCP integration uses the `rmcp` crate for protocol implementation.
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="One Server Per Service" icon="server">
+    Don't bundle unrelated tools in one server. Split by domain (filesystem, github, database).
+  </Card>
+  <Card title="Clear Tool Names" icon="tag">
+    Tool names become part of the worker's tool list. Use descriptive names like `read_file`, not `rf`.
+  </Card>
+  <Card title="Handle Errors Gracefully" icon="triangle-exclamation">
+    Return structured errors, not exceptions. The LLM sees the error and can retry or adjust.
+  </Card>
+  <Card title="Document Tools" icon="book">
+    Provide detailed descriptions and parameter schemas. Workers rely on this to understand what tools do.
+  </Card>
+</CardGroup>

@@ -1,0 +1,390 @@
+---
+title: 'Cron Jobs'
+description: 'Scheduled recurring tasks with wall-clock and interval scheduling'
+---
+
+Spacebot's cron system runs scheduled tasks on timers. Each cron job gets a fresh short-lived channel, runs the job's prompt through the LLM, and delivers the result to a messaging target.
+
+## Configuration
+
+Define cron jobs in your `agent.toml`:
+
+```toml agent.toml
+[[cron]]
+id = "daily-standup"
+prompt = """Summarize what I worked on today based on my memories and tasks. 
+Include completed tasks, new memories saved, and any blockers."""
+cron_expr = "0 17 * * 1-5"  # 5 PM weekdays
+delivery_target = "discord:123456789"
+enabled = true
+
+[[cron]]
+id = "morning-briefing"
+prompt = "Review my calendar and top-priority tasks. Send a brief summary."
+interval_secs = 86400  # Daily at consistent wall-clock time
+active_hours = [8, 18]  # Only fire between 8 AM and 6 PM
+delivery_target = "telegram:user_456"
+timeout_secs = 120
+```
+
+## Scheduling Modes
+
+Spacebot supports two scheduling modes:
+
+<Tabs>
+  <Tab title="Wall-Clock Cron">
+    Use standard 5-field cron expressions:
+    
+    ```toml
+    cron_expr = "0 9 * * 1-5"  # 9 AM weekdays
+    ```
+    
+    <ParamField path="cron_expr" type="string">
+      5-field cron syntax: `minute hour day-of-month month day-of-week`
+    </ParamField>
+    
+    Evaluated in the timezone specified by `cron_timezone` in `[defaults]`:
+    
+    ```toml
+    [defaults]
+    cron_timezone = "America/New_York"  # IANA timezone
+    ```
+    
+    <Warning>
+      If `cron_timezone` is not set, wall-clock jobs use the system's local time, which is often UTC in Docker/containerized environments. Set an explicit timezone to avoid jobs skipping their active window.
+    </Warning>
+  </Tab>
+  <Tab title="Interval">
+    Fire every N seconds:
+    
+    ```toml
+    interval_secs = 3600  # Every hour
+    ```
+    
+    <ParamField path="interval_secs" type="integer">
+      Interval in seconds between executions (default: 3600)
+    </ParamField>
+    
+    For intervals that evenly divide 86400 (a day), the first execution aligns to midnight UTC to ensure consistent wall-clock fire times:
+    
+    - `interval_secs = 3600` (1 hour) fires at :00 past each hour
+    - `interval_secs = 7200` (2 hours) fires every 2 hours from midnight
+    - `interval_secs = 43200` (12 hours) fires at midnight and noon
+    
+    Non-divisors fire `interval_secs` after startup.
+  </Tab>
+</Tabs>
+
+<Note>
+  If both `cron_expr` and `interval_secs` are present, `cron_expr` takes precedence.
+</Note>
+
+## Active Hours
+
+Restrict when a job can fire using `active_hours`:
+
+```toml
+active_hours = [9, 17]  # Only fire between 9 AM and 5 PM
+```
+
+<ParamField path="active_hours" type="tuple">
+  `[start_hour, end_hour]` in 24-hour format (0-23)
+</ParamField>
+
+Examples:
+
+<CodeGroup>
+```toml Business Hours
+active_hours = [9, 17]  # 9 AM - 5 PM
+```
+
+```toml Night Hours
+active_hours = [22, 6]  # 10 PM - 6 AM (wraps midnight)
+```
+
+```toml Always Active
+active_hours = [0, 0]  # Normalized to None (no restriction)
+```
+</CodeGroup>
+
+Active hours respect the `cron_timezone` setting.
+
+## Delivery Targets
+
+Results are sent via the messaging system:
+
+```toml
+delivery_target = "adapter:target"
+```
+
+<ParamField path="delivery_target" type="string" required>
+  Format: `adapter:target_id`
+  
+  Examples:
+  - `discord:123456789` (Discord channel ID)
+  - `telegram:user_456` (Telegram user ID)
+  - `webhook:https://example.com/hook`
+</ParamField>
+
+The agent must have the corresponding messaging adapter configured. See [Messaging](/messaging/overview) for adapter setup.
+
+## Run-Once Jobs
+
+Schedule one-time execution:
+
+```toml
+[[cron]]
+id = "onboarding-welcome"
+prompt = "Send a welcome message with getting-started tips"
+interval_secs = 60  # Fire 1 minute after startup
+delivery_target = "discord:123456789"
+run_once = true
+```
+
+<ParamField path="run_once" type="boolean">
+  If true, the job disables itself after first execution (default: false)
+</ParamField>
+
+Run-once jobs transition to `enabled = false` in the database after firing. You can re-enable them via the API.
+
+## Execution Model
+
+When a cron job fires:
+
+<Steps>
+  <Step title="Create Channel">
+    Spacebot creates a fresh short-lived channel with ID `cron:{job_id}`.
+  </Step>
+  <Step title="Send Prompt">
+    The job's prompt becomes a synthetic message sent to the channel.
+  </Step>
+  <Step title="LLM Processing">
+    The channel processes the message with full branching and worker capabilities.
+  </Step>
+  <Step title="Collect Response">
+    Text responses are collected (up to the timeout).
+  </Step>
+  <Step title="Deliver">
+    The result is sent to the delivery target via the messaging system.
+  </Step>
+  <Step title="Cleanup">
+    The channel terminates. Its history is discarded (cron jobs are stateless).
+  </Step>
+</Steps>
+
+```rust src/cron/scheduler.rs
+let timeout = Duration::from_secs(job.timeout_secs.unwrap_or(120));
+
+let channel = Channel::new(
+    channel_id.clone(),
+    context.deps.clone(),
+    response_tx,
+    event_rx,
+    context.screenshot_dir.clone(),
+    context.logs_dir.clone(),
+);
+
+// Collect responses until timeout or channel closes
+```
+
+<ParamField path="timeout_secs" type="integer">
+  Maximum wall-clock seconds to wait for the job to complete (default: 120)
+</ParamField>
+
+## Circuit Breaker
+
+Cron jobs have automatic failure protection:
+
+<Steps>
+  <Step title="Failure Tracking">
+    Each job tracks `consecutive_failures`.
+  </Step>
+  <Step title="Threshold">
+    After 3 consecutive failures, the circuit breaker trips.
+  </Step>
+  <Step title="Auto-Disable">
+    The job is automatically disabled and persisted to the database.
+  </Step>
+</Steps>
+
+```rust src/cron/scheduler.rs
+const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
+if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+    tracing::warn!(
+        cron_id = %job_id,
+        "circuit breaker tripped, disabling"
+    );
+    job.enabled = false;
+    store.update_enabled(&job_id, false).await?;
+}
+```
+
+Re-enable via the API:
+
+```bash
+curl -X POST http://localhost:3000/api/agents/spacebot/cron/daily-standup/enable
+```
+
+This resets the failure counter.
+
+## Dynamic Management
+
+Manage cron jobs at runtime via LLM tools or HTTP API:
+
+<Tabs>
+  <Tab title="LLM Tool">
+    Channels have access to the `cron` tool:
+    
+    <CodeGroup>
+    ```json Create
+    {
+      "action": "create",
+      "id": "weekly-review",
+      "prompt": "Summarize this week's progress",
+      "cron_expr": "0 9 * * 1",
+      "delivery_target": "discord:123456789"
+    }
+    ```
+    
+    ```json Update
+    {
+      "action": "update",
+      "id": "daily-standup",
+      "enabled": false
+    }
+    ```
+    
+    ```json Trigger
+    {
+      "action": "trigger",
+      "id": "daily-standup"
+    }
+    ```
+    
+    ```json Delete
+    {
+      "action": "delete",
+      "id": "weekly-review"
+    }
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="HTTP API">
+    <CodeGroup>
+    ```bash List
+    curl http://localhost:3000/api/agents/spacebot/cron
+    ```
+    
+    ```bash Create
+    curl -X POST http://localhost:3000/api/agents/spacebot/cron \
+      -H "Content-Type: application/json" \
+      -d '{
+        "id": "weekly-review",
+        "prompt": "Summarize this week",
+        "cron_expr": "0 9 * * 1",
+        "delivery_target": "discord:123456789"
+      }'
+    ```
+    
+    ```bash Enable/Disable
+    curl -X POST http://localhost:3000/api/agents/spacebot/cron/daily-standup/enable
+    curl -X POST http://localhost:3000/api/agents/spacebot/cron/daily-standup/disable
+    ```
+    
+    ```bash Trigger Now
+    curl -X POST http://localhost:3000/api/agents/spacebot/cron/daily-standup/trigger
+    ```
+    
+    ```bash Delete
+    curl -X DELETE http://localhost:3000/api/agents/spacebot/cron/weekly-review
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+## Execution Logs
+
+Cron executions are logged to the `cron_executions` table:
+
+```sql
+CREATE TABLE cron_executions (
+    id TEXT PRIMARY KEY,
+    cron_id TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    success INTEGER NOT NULL,
+    summary TEXT
+);
+```
+
+Query via the API:
+
+```bash
+curl http://localhost:3000/api/agents/spacebot/cron/daily-standup/executions?limit=10
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Keep Prompts Focused" icon="bullseye">
+    Cron jobs run in fresh channels with no history. Be explicit about what you want. "Summarize today's tasks" not "what did I do?"
+  </Card>
+  <Card title="Set Active Hours" icon="clock">
+    Avoid firing jobs during off-hours. Use `active_hours` to respect work/life boundaries.
+  </Card>
+  <Card title="Use Timeouts" icon="stopwatch">
+    Default is 120s. If your job needs more time (e.g., running a full test suite), increase `timeout_secs`.
+  </Card>
+  <Card title="Monitor Failures" icon="triangle-exclamation">
+    Check the executions table periodically. If a job is failing repeatedly, the circuit breaker will disable it.
+  </Card>
+</CardGroup>
+
+<Warning>
+  **Cron jobs are stateless.** The channel created for each execution has no memory of previous runs. If you need continuity, store results as memories or tasks.
+</Warning>
+
+## Examples
+
+<AccordionGroup>
+  <Accordion title="Daily Task Summary">
+    ```toml
+    [[cron]]
+    id = "task-summary"
+    prompt = "List all tasks in 'in_progress' status and their subtask completion. Include any blockers."
+    cron_expr = "0 9 * * 1-5"
+    delivery_target = "discord:123456789"
+    active_hours = [9, 18]
+    ```
+  </Accordion>
+  <Accordion title="Weekly Memory Review">
+    ```toml
+    [[cron]]
+    id = "weekly-review"
+    prompt = "Recall memories from the past 7 days. Summarize key decisions, learnings, and events."
+    cron_expr = "0 17 * * 5"  # Friday 5 PM
+    delivery_target = "telegram:user_456"
+    timeout_secs = 180
+    ```
+  </Accordion>
+  <Accordion title="Hourly Health Check">
+    ```toml
+    [[cron]]
+    id = "health-check"
+    prompt = "Check if the API is responding. If not, investigate logs and report status."
+    interval_secs = 3600
+    delivery_target = "webhook:https://alerts.example.com/spacebot"
+    ```
+  </Accordion>
+  <Accordion title="Morning Briefing">
+    ```toml
+    [[cron]]
+    id = "morning-briefing"
+    prompt = "Good morning! Here are your high-priority tasks, recent memories, and calendar for today."
+    cron_expr = "0 8 * * 1-5"
+    active_hours = [8, 9]  # Only fire during the 8 AM hour
+    delivery_target = "discord:123456789"
+    ```
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,202 @@
+---
+title: spacebot status
+description: Show status of the running Spacebot daemon
+---
+
+## Overview
+
+Checks if the Spacebot daemon is running and displays basic status information including process ID and uptime.
+
+## Usage
+
+```bash
+spacebot status
+```
+
+This command has no flags or arguments.
+
+## Output
+
+When the daemon is running, you'll see:
+
+```
+spacebot is running
+  pid:    42819
+  uptime: 2h 34m 18s
+```
+
+When not running:
+
+```
+spacebot is not running
+```
+
+## Examples
+
+### Check daemon status
+
+```bash
+spacebot status
+```
+
+Output:
+```
+spacebot is running
+  pid:    42819
+  uptime: 0h 5m 42s
+```
+
+### Script usage
+
+```bash
+if spacebot status &>/dev/null; then
+    echo "Daemon is healthy"
+else
+    echo "Daemon is down, restarting..."
+    spacebot start
+fi
+```
+
+### Monitor uptime
+
+```bash
+watch -n 5 spacebot status
+```
+
+Refreshes status every 5 seconds.
+
+## Status Fields
+
+<ParamField path="pid" type="integer">
+  The process ID of the running daemon. Use this with system tools like `ps`, `top`, or `kill`.
+</ParamField>
+
+<ParamField path="uptime" type="duration">
+  How long the daemon has been running, formatted as `{hours}h {minutes}m {seconds}s`.
+</ParamField>
+
+## Error Cases
+
+### Daemon not running
+
+```bash
+$ spacebot status
+spacebot is not running
+```
+
+Exit code: 1
+
+### IPC failure
+
+```bash
+$ spacebot status
+failed to query daemon status: Connection refused (os error 111)
+```
+
+Exit code: 1
+
+Possible causes:
+- PID file exists but daemon is dead (stale PID file)
+- IPC socket removed or inaccessible
+- Permission issue
+
+Solution:
+```bash
+# Verify process exists
+ps -p $(cat ~/.spacebot/spacebot.pid) || rm ~/.spacebot/spacebot.pid
+```
+
+### Unexpected response
+
+```bash
+$ spacebot status
+unexpected response from daemon
+```
+
+Exit code: 1
+
+This indicates a protocol mismatch between the CLI and daemon. Usually means:
+- You're running incompatible versions
+- The IPC socket is corrupt
+
+Solution: Restart the daemon with `spacebot restart`.
+
+## Exit Codes
+
+| Code | Meaning |
+|------|----------|
+| 0 | Daemon is running and responsive |
+| 1 | Daemon is not running or IPC failed |
+
+You can use exit codes in scripts:
+
+```bash
+spacebot status
+if [ $? -eq 0 ]; then
+    echo "Daemon OK"
+fi
+```
+
+## What Status Does NOT Show
+
+The `status` command only checks if the daemon process is alive. It does **not** show:
+
+- Active channels or conversations
+- Worker states
+- Memory or CPU usage
+- API server status
+- Connected messaging platforms
+- Error counts or health metrics
+
+For detailed runtime information, use the HTTP API:
+
+```bash
+curl http://localhost:19898/api/channels
+```
+
+Or check the web UI at `http://localhost:19898`.
+
+## Uptime Calculation
+
+Uptime is calculated from the daemon's internal start timestamp, **not** from the PID file creation time. This means:
+
+- The uptime survives log rotation
+- It's accurate even if the PID file is touched
+- It resets to zero on restart
+
+## Process Inspection
+
+Use standard Unix tools with the PID shown by `spacebot status`:
+
+<CodeGroup>
+```bash Memory usage
+ps -p 42819 -o rss=
+```
+
+```bash Full process info
+ps aux | grep 42819
+```
+
+```bash Open files
+lsof -p 42819
+```
+
+```bash System calls
+strace -p 42819
+```
+</CodeGroup>
+
+## Related Commands
+
+- [`spacebot start`](/api/cli/start) - Start the daemon
+- [`spacebot stop`](/api/cli/stop) - Stop the daemon
+
+## Implementation Notes
+
+The status command:
+1. Reads `~/.spacebot/spacebot.pid` to get the process ID
+2. Sends `IpcCommand::Status` via Unix domain socket
+3. Receives `IpcResponse::Status { pid, uptime_seconds }`
+4. Formats the uptime as `{hours}h {minutes}m {seconds}s`
+
+The IPC mechanism ensures you're querying the actual running daemon, not just checking if a process exists.

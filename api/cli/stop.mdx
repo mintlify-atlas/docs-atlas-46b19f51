@@ -1,0 +1,161 @@
+---
+title: spacebot stop
+description: Stop the running Spacebot daemon
+---
+
+## Overview
+
+Stops the currently running Spacebot daemon gracefully. Waits up to 10 seconds for clean shutdown before timing out.
+
+## Usage
+
+```bash
+spacebot stop
+```
+
+This command has no flags or arguments.
+
+## Behavior
+
+When you run `spacebot stop`:
+
+1. **Checks if running**: Reads the PID file to verify a daemon is running.
+
+2. **Sends shutdown command**: Uses IPC (Inter-Process Communication) to send a graceful shutdown signal to the daemon.
+
+3. **Waits for exit**: Polls the process for up to 10 seconds, checking if it has terminated.
+
+4. **Confirms shutdown**: Reports success or timeout.
+
+## Graceful Shutdown
+
+During shutdown, the daemon:
+- Completes in-flight message processing
+- Disconnects from messaging platforms (Discord, Telegram, etc.)
+- Closes all active channels and workers
+- Flushes pending database writes
+- Stops cron schedulers
+- Closes database connections
+- Removes the PID file
+
+## Examples
+
+### Stop running daemon
+
+```bash
+spacebot stop
+```
+
+Output:
+```
+stopping spacebot (pid 42819)...
+spacebot stopped
+```
+
+### Daemon not running
+
+```bash
+$ spacebot stop
+spacebot is not running
+```
+
+Exit code: 1
+
+### Stop and restart
+
+<CodeGroup>
+```bash Manual
+spacebot stop && spacebot start
+```
+
+```bash Using restart command
+spacebot restart
+```
+</CodeGroup>
+
+## Error Cases
+
+### Not running
+
+```bash
+$ spacebot stop
+spacebot is not running
+```
+
+Exit code: 1. This is safe to ignore if you're not sure whether the daemon is running.
+
+### IPC failure
+
+```bash
+$ spacebot stop
+failed to send shutdown command: Connection refused (os error 111)
+```
+
+Possible causes:
+- PID file exists but daemon is dead (stale PID file)
+- Unix socket removed or inaccessible
+- Permission issue
+
+Solution: Check `ps aux | grep spacebot` to verify the process state. If the daemon is truly dead, remove `~/.spacebot/spacebot.pid` manually.
+
+### Timeout
+
+```bash
+$ spacebot stop
+stopping spacebot (pid 42819)...
+spacebot did not stop within 10 seconds (pid 42819)
+```
+
+Exit code: 1
+
+Possible causes:
+- Long-running task blocking shutdown
+- Deadlock in shutdown code
+- Process hung
+
+Solution: Use `kill -9 42819` to force termination if necessary, then investigate logs in `~/.spacebot/logs/`.
+
+## Timeout Behavior
+
+The 10-second timeout is **not configurable**. If the daemon doesn't exit within this window:
+- The `stop` command exits with an error
+- The daemon process may still be running
+- You should investigate why shutdown is taking so long
+
+## Force Kill
+
+If `spacebot stop` times out or fails, you can force-kill the process:
+
+```bash
+# Find the process ID
+ps aux | grep spacebot
+
+# Force kill (replace 42819 with actual PID)
+kill -9 42819
+
+# Clean up stale PID file
+rm ~/.spacebot/spacebot.pid
+```
+
+**Warning**: Force-killing may leave the system in an inconsistent state. Use this only as a last resort.
+
+## Related Commands
+
+- [`spacebot start`](/api/cli/start) - Start the daemon
+- [`spacebot status`](/api/cli/status) - Check if daemon is running
+
+## Exit Codes
+
+| Code | Meaning |
+|------|----------|
+| 0 | Daemon stopped successfully |
+| 1 | Daemon not running, IPC failure, or timeout |
+
+## Implementation Notes
+
+The stop command uses a Unix domain socket for IPC (`~/.spacebot/spacebot.sock`). The daemon listens for `IpcCommand::Shutdown` and responds with `IpcResponse::Ok` before initiating shutdown.
+
+This approach is more reliable than sending SIGTERM because:
+- It confirms the daemon received the signal
+- It allows the daemon to respond before shutting down
+- It provides structured error messages

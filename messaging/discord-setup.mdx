@@ -1,0 +1,218 @@
+---
+title: Discord Setup
+description: Connect Spacebot to Discord servers with full support for threads, embeds, and interactions.
+---
+
+Connect Spacebot to your Discord server. Takes about 5 minutes.
+
+You need a **Bot Token** from a Discord application.
+
+## Step 1: Create an Application
+
+<Steps>
+  <Step title="Open the Developer Portal">
+    Go to [discord.com/developers/applications](https://discord.com/developers/applications) and click **New Application**.
+    
+    Name it whatever you want — this is the internal name, not the bot's display name.
+  </Step>
+
+  <Step title="Create a Bot">
+    In your application settings, go to **Bot**:
+    
+    - Click **Add Bot**
+    - Copy the **bot token** — you'll need this in a moment
+    - Scroll down to **Privileged Gateway Intents** and enable **Message Content Intent**
+  </Step>
+
+  <Step title="Enable Message Content Intent">
+    <Warning>
+    **Message Content Intent is required.** Without it, the bot cannot see message content and will fail with "Disallowed intent(s)" error. Make sure it's enabled and you've clicked **Save Changes** at the bottom of the Bot page.
+    </Warning>
+  </Step>
+</Steps>
+
+## Step 2: Set Bot Permissions
+
+In your application settings, go to **OAuth2** → **URL Generator**:
+
+- **Scopes:** `bot`
+- **Bot Permissions:**
+  - Send Messages
+  - Send Messages in Threads
+  - Create Public Threads
+  - Read Message History
+  - Embed Links
+  - Attach Files
+  - Add Reactions
+
+Copy the generated URL and open it in your browser to invite the bot to your server.
+
+## Step 3: Get Your Guild ID
+
+In Discord, enable Developer Mode:
+
+1. Open **User Settings** → **Advanced**
+2. Toggle on **Developer Mode**
+3. Right-click your server name → **Copy Server ID**
+
+This is your guild ID.
+
+## Step 4: Add Token to Spacebot
+
+<Tabs>
+  <Tab title="TOML Config">
+    ```toml config.toml
+    [messaging.discord]
+    enabled = true
+    token = "your-bot-token"
+
+    [[bindings]]
+    agent_id = "main"
+    channel = "discord"
+    guild_id = "YOUR_GUILD_ID"
+    ```
+
+    You can also reference environment variables:
+
+    ```toml config.toml
+    [messaging.discord]
+    enabled = true
+    token = "env:DISCORD_BOT_TOKEN"
+    ```
+
+    Token changes in config require a restart.
+  </Tab>
+</Tabs>
+
+## Verify It's Working
+
+Send a message in a channel the bot has access to. You should see:
+
+1. A typing indicator while the bot processes your message
+2. A reply from the bot
+
+If the bot doesn't respond, check the troubleshooting section below.
+
+## Filtering
+
+### Restrict to Specific Channels
+
+By default the bot responds in every channel it has access to. To limit it, add channel IDs to your binding.
+
+```toml config.toml
+[[bindings]]
+agent_id = "main"
+channel = "discord"
+guild_id = "123456789"
+channel_ids = ["111111", "222222"]
+```
+
+If `channel_ids` is empty or omitted, the bot responds in all channels.
+
+### Require Mentions Per Channel
+
+Set `require_mention = true` on a Discord binding to only process messages that either:
+
+- Explicitly @mention the bot, or
+- Reply to a bot message
+
+```toml config.toml
+[[bindings]]
+agent_id = "main"
+channel = "discord"
+guild_id = "123456789"
+channel_ids = ["111111", "222222"]
+require_mention = true
+```
+
+This works well for busy channels where you only want direct interactions.
+
+### DM Filtering
+
+By default, all DMs are ignored. To allow specific users, add their Discord user IDs.
+
+```toml config.toml
+[messaging.discord]
+dm_allowed_users = ["USER_ID_1", "USER_ID_2"]
+```
+
+You can also set per-binding DM allowlists:
+
+```toml config.toml
+[[bindings]]
+agent_id = "main"
+channel = "discord"
+guild_id = "123456789"
+dm_allowed_users = ["USER_ID_3"]
+```
+
+Per-binding lists are merged with the instance-wide list. Permission changes hot-reload within a couple seconds — no restart needed.
+
+### Multiple Servers
+
+Route different Discord servers to different agents.
+
+```toml config.toml
+[[bindings]]
+agent_id = "main"
+channel = "discord"
+guild_id = "123456789"
+
+[[bindings]]
+agent_id = "dev-bot"
+channel = "discord"
+guild_id = "987654321"
+```
+
+Each agent has its own memory, identity, and conversation history.
+
+## Threads
+
+Threads get their own separate conversation with isolated history. Messages in the main channel share one conversation. Threads are the natural fit for isolated conversations in a busy server.
+
+The bot can create threads from messages when responding with `OutboundResponse::ThreadReply`. If thread creation fails (missing permissions or DM context), it falls back to a regular message.
+
+## Rich Messages
+
+Discord supports rich message features:
+
+### Embeds
+
+Cards with titles, descriptions, fields, colors, and footers. Up to 10 embeds per message.
+
+### Interactive Elements
+
+- **Buttons** — Primary, Secondary, Success, Danger, and Link styles. Max 5 per row.
+- **Select Menus** — Dropdown selection with custom options
+
+### Polls
+
+Create polls with:
+- Up to 10 answer options
+- Duration between 1 and 720 hours
+- Multiselect support
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `Disallowed intent(s)` error in logs | Message Content Intent not enabled | Discord Developer Portal → Bot → enable Message Content Intent → Save Changes |
+| Bot connects but doesn't see messages | Message Content Intent disabled | Discord Developer Portal → Bot → enable Message Content Intent |
+| Bot doesn't respond in channel | No access | Make sure the bot has permissions in that channel |
+| Bot doesn't respond to DMs | DM filtering | Add user ID to `dm_allowed_users` |
+| Bot responds in wrong channels | No channel filter | Add `channel_ids` to your binding |
+| `401 Unauthorized` on startup | Invalid token | Copy a fresh token from the Developer Portal |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configure Permissions" icon="shield" href="/configuration/permissions">
+    Set up channel filters and access control
+  </Card>
+  <Card title="Agent Configuration" icon="robot" href="/core/agents">
+    Create multiple agents for different servers
+  </Card>
+  <Card title="Message Coalescing" icon="layer-group" href="/messaging/overview#message-coalescing">
+    Learn how burst handling works
+  </Card>
+</CardGroup>

@@ -1,0 +1,358 @@
+---
+title: spacebot auth
+description: Manage authentication with LLM providers
+---
+
+## Overview
+
+Authenticate Spacebot with LLM providers via OAuth or API keys. The `spacebot auth` command manages login, logout, token refresh, and credential status.
+
+## Subcommands
+
+- [`login`](#login) - Log in via OAuth (opens browser)
+- [`status`](#status) - Show current auth status
+- [`logout`](#logout) - Log out (remove credentials)
+- [`refresh`](#refresh) - Refresh the access token
+
+---
+
+## login
+
+Authenticate with Anthropic via OAuth. Opens your browser to complete the login flow.
+
+### Usage
+
+```bash
+spacebot auth login [OPTIONS]
+```
+
+### Options
+
+<ParamField path="--console" type="boolean" default="false">
+  Use API Console authentication instead of Claude Pro/Max. Choose this if you want to use API credits rather than a Claude subscription.
+</ParamField>
+
+### Examples
+
+#### Standard login (Claude Pro/Max)
+
+```bash
+spacebot auth login
+```
+
+Output:
+```
+Opening browser for OAuth login...
+Visit this URL if the browser doesn't open:
+https://auth.anthropic.com/oauth/authorize?...
+
+Waiting for callback...
+✓ Login successful
+Token expires in 7200m
+```
+
+#### Console login (API credits)
+
+```bash
+spacebot auth login --console
+```
+
+Output:
+```
+Opening browser for API Console login...
+Visit this URL if the browser doesn't open:
+https://console.anthropic.com/oauth/authorize?...
+
+Waiting for callback...
+✓ Login successful
+Token expires in 43200m
+```
+
+### OAuth Flow
+
+1. **CLI starts local server**: Listens on `http://localhost:8919` for OAuth callback
+2. **Opens browser**: Navigates to Anthropic's OAuth authorization page
+3. **User authorizes**: Logs in and grants permissions
+4. **Callback received**: Browser redirects to `http://localhost:8919/callback` with auth code
+5. **Token exchange**: CLI exchanges code for access token and refresh token
+6. **Credentials saved**: Stored encrypted in `~/.spacebot/auth.json`
+
+### Manual URL
+
+If the browser doesn't open automatically (e.g., in SSH sessions):
+
+1. Copy the URL from the CLI output
+2. Open it in a browser on any device
+3. Complete the login
+4. The callback will still reach your local server
+
+For remote servers, use SSH port forwarding:
+
+```bash
+ssh -L 8919:localhost:8919 user@remote-server
+```
+
+---
+
+## status
+
+Show current authentication status and token expiration.
+
+### Usage
+
+```bash
+spacebot auth status
+```
+
+### Examples
+
+#### Valid credentials
+
+```bash
+spacebot auth status
+```
+
+Output:
+```
+Anthropic OAuth: valid (expires in 3840m)
+  access token: sk-ant-1234567890ab...
+  refresh token: rft-1234567890ab...
+  credentials file: /home/user/.spacebot/auth.json
+```
+
+#### Expired credentials
+
+```bash
+spacebot auth status
+```
+
+Output:
+```
+Anthropic OAuth: expired (240m ago)
+  access token: sk-ant-1234567890ab...
+  refresh token: rft-1234567890ab...
+  credentials file: /home/user/.spacebot/auth.json
+```
+
+Solution: Run `spacebot auth refresh` to renew the token.
+
+#### No credentials
+
+```bash
+spacebot auth status
+```
+
+Output:
+```
+No OAuth credentials found.
+Run `spacebot auth login` to authenticate.
+```
+
+### Token Display
+
+Tokens are truncated to the first 20 characters for security. The full tokens are stored in `auth.json`.
+
+---
+
+## logout
+
+Remove stored OAuth credentials.
+
+### Usage
+
+```bash
+spacebot auth logout
+```
+
+### Examples
+
+#### Logout
+
+```bash
+spacebot auth logout
+```
+
+Output:
+```
+Credentials removed.
+```
+
+#### Already logged out
+
+```bash
+spacebot auth logout
+```
+
+Output:
+```
+No credentials found.
+```
+
+### What Happens
+
+- Deletes `~/.spacebot/auth.json`
+- Does **not** revoke tokens on Anthropic's side
+- Does **not** stop the running daemon (you may need to restart)
+
+To fully revoke access, visit your [Anthropic account settings](https://console.anthropic.com/settings/keys).
+
+---
+
+## refresh
+
+Manually refresh the access token using the stored refresh token.
+
+### Usage
+
+```bash
+spacebot auth refresh
+```
+
+### Examples
+
+#### Successful refresh
+
+```bash
+spacebot auth refresh
+```
+
+Output:
+```
+Refreshing access token...
+Token refreshed (expires in 7200m)
+```
+
+#### No credentials
+
+```bash
+$ spacebot auth refresh
+Error: no credentials found — run `spacebot auth login` first
+```
+
+#### Refresh failed
+
+```bash
+$ spacebot auth refresh
+Refreshing access token...
+Error: refresh failed
+Caused by:
+    HTTP 401: Invalid refresh token
+```
+
+Solution: Your refresh token has expired or been revoked. Run `spacebot auth login` again.
+
+### Automatic Refresh
+
+The daemon automatically refreshes tokens when they're close to expiration. You typically don't need to run this command manually unless:
+
+- You want to test credential validity
+- The daemon is not running
+- You're troubleshooting authentication issues
+
+---
+
+## Authentication Modes
+
+### Claude Pro/Max (Default)
+
+Uses your Claude subscription credits. Best for:
+- Personal use
+- Development
+- Lower-volume production
+
+### API Console
+
+Uses pay-as-you-go API credits. Best for:
+- High-volume production
+- Enterprise deployments
+- When you need API-specific features
+
+Specify with `--console` flag:
+
+```bash
+spacebot auth login --console
+```
+
+## Credential Storage
+
+Credentials are stored in `~/.spacebot/auth.json` in encrypted format:
+
+```json
+{
+  "access_token": "sk-ant-...",
+  "refresh_token": "rft-...",
+  "expires_at": 1234567890000,
+  "mode": "max"
+}
+```
+
+**Security notes:**
+- File is created with mode `0600` (owner read/write only)
+- Tokens are encrypted using AES-256-GCM
+- Never commit `auth.json` to version control
+- Rotate tokens regularly via logout/login
+
+## Token Lifetime
+
+| Token Type | Lifetime |
+|------------|----------|
+| Access token (Max) | 2 hours |
+| Access token (Console) | 30 days |
+| Refresh token | 90 days |
+
+The daemon automatically refreshes access tokens before they expire.
+
+## Alternative: API Keys
+
+Instead of OAuth, you can configure API keys directly in `config.toml`:
+
+```toml
+[llm]
+anthropic_api_key = "sk-ant-..."
+openai_api_key = "sk-..."
+```
+
+OAuth credentials take precedence over config file keys.
+
+## Error Cases
+
+### Browser doesn't open
+
+```bash
+failed to open browser: no suitable browser found
+```
+
+Solution: Copy the URL from the output and open it manually.
+
+### Port already in use
+
+```bash
+Error: failed to start OAuth callback server
+Caused by:
+    Address already in use (os error 48)
+```
+
+Solution: Another process is using port 8919. Kill it or wait for `auth login` timeout.
+
+### Network error
+
+```bash
+Error: refresh failed
+Caused by:
+    Connection timed out
+```
+
+Solution: Check your internet connection and firewall settings.
+
+## Related Commands
+
+- [`spacebot start`](/api/cli/start) - Start daemon (requires authentication)
+- [`spacebot status`](/api/cli/status) - Check daemon status
+
+## Implementation Notes
+
+- The OAuth server runs on `http://localhost:8919`
+- Uses PKCE (Proof Key for Code Exchange) for enhanced security
+- Callback endpoint: `/callback`
+- State parameter prevents CSRF attacks
+- Credentials are persisted across daemon restarts

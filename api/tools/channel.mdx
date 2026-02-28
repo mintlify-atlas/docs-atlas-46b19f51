@@ -1,0 +1,393 @@
+---
+title: Channel Tools
+description: Tools available to channel processes for user interaction and conversation management
+---
+
+Channel processes use these tools to interact with users, delegate work, and manage conversation flow. Channels are the user-facing LLM processes with personality and context.
+
+## reply
+
+Send a message to the user in the current conversation. Supports rich content including cards, interactive elements, and polls.
+
+<ParamField path="content" type="string" required>
+  The message content to send. You can use markdown formatting. Mentions like `@Username` are automatically converted to platform-specific syntax.
+</ParamField>
+
+<ParamField path="thread_name" type="string">
+  Create a new public thread with this name and post the reply inside it. Thread names are capped at 100 characters.
+</ParamField>
+
+<ParamField path="cards" type="array">
+  Formatted cards (e.g., Discord embeds) to attach to the message. Great for structured reports, summaries, or visually distinct content. Maximum 10 cards.
+  
+  Each card can include:
+  - `title` (string)
+  - `description` (string)
+  - `color` (integer) - Decimal color code
+  - `url` (string)
+  - `fields` (array) - Each field has `name`, `value`, and optional `inline` (boolean)
+  - `footer` (string)
+</ParamField>
+
+<ParamField path="interactive_elements" type="array">
+  Interactive components like buttons or select menus. Button clicks are sent back as InteractionEvent with the corresponding `custom_id`. Maximum 5 element rows.
+  
+  Each element can be:
+  - **Buttons**: `type: "buttons"` with array of button objects containing `label`, `custom_id`, `style` ("primary", "secondary", "success", "danger", "link"), and optional `url`
+  - **Select menu**: `type: "select"` with `custom_id`, `options` array (each with `label`, `value`, optional `description` and `emoji`), and optional `placeholder`
+</ParamField>
+
+<ParamField path="poll" type="object">
+  A poll to attach to the message.
+  
+  Poll object includes:
+  - `question` (string, required)
+  - `answers` (array of strings, required)
+  - `allow_multiselect` (boolean)
+  - `duration_hours` (integer, defaults to 24)
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the reply was sent successfully
+</ResponseField>
+
+<ResponseField name="conversation_id" type="string">
+  The conversation identifier
+</ResponseField>
+
+<ResponseField name="content" type="string">
+  The final content that was sent (after mention conversion)
+</ResponseField>
+
+### Example
+
+```json
+{
+  "content": "Task completed! Here's the summary:",
+  "cards": [
+    {
+      "title": "Build Status",
+      "description": "All tests passed",
+      "color": 3066993,
+      "fields": [
+        {"name": "Duration", "value": "2m 34s", "inline": true},
+        {"name": "Tests", "value": "42 passed", "inline": true}
+      ]
+    }
+  ]
+}
+```
+
+<Note>
+In email conversations, this sends an actual outbound email. Use `branch` + `skip` for internal thinking without sending.
+</Note>
+
+---
+
+## branch
+
+Fork the current conversation context to think independently. The branch gets a clone of your full conversation history and can use memory tools to recall and save information.
+
+<ParamField path="description" type="string" required>
+  What the branch should investigate or think about. Be specific about what conclusion you want. The branch sees your full context but works independently.
+</ParamField>
+
+<ResponseField name="branch_id" type="string">
+  The UUID of the created branch
+</ResponseField>
+
+<ResponseField name="spawned" type="boolean">
+  Whether the branch was created successfully
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message about the branch
+</ResponseField>
+
+### Example
+
+```json
+{
+  "description": "Search my memories for any previous conversations about API rate limits with this user. Return a summary of what we discussed and any decisions made."
+}
+```
+
+<Tip>
+Branches are for thinking and memory work. They have your context but work independently. You never see their working, only their conclusion.
+</Tip>
+
+---
+
+## spawn_worker
+
+Create a new worker process to execute a task. Workers can be fire-and-forget (run once) or interactive (accept follow-up messages).
+
+<ParamField path="task" type="string" required>
+  Clear, specific description of what the worker should do. Include all context needed since the worker can't see your conversation history.
+</ParamField>
+
+<ParamField path="interactive" type="boolean" default={false}>
+  If true, the worker stays alive and accepts follow-up messages via `route`. If false, the worker runs once and returns.
+</ParamField>
+
+<ParamField path="suggested_skills" type="array">
+  List of skill names from available skills that are relevant to this task. The worker sees all skills and can read any of them, but suggested skills are flagged as recommended.
+</ParamField>
+
+<ParamField path="worker_type" type="string" default="builtin">
+  Worker type: `"builtin"` runs a Rig agent loop with shell/file/exec tools. `"opencode"` spawns an OpenCode subprocess with full coding agent capabilities. Use `"opencode"` for complex coding tasks.
+</ParamField>
+
+<ParamField path="directory" type="string">
+  Working directory for the worker. Required for `"opencode"` workers. The OpenCode agent operates in this directory.
+</ParamField>
+
+<ResponseField name="worker_id" type="string">
+  The UUID of the spawned worker
+</ResponseField>
+
+<ResponseField name="spawned" type="boolean">
+  Whether the worker was created successfully
+</ResponseField>
+
+<ResponseField name="interactive" type="boolean">
+  Whether this is an interactive worker
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message
+</ResponseField>
+
+### Example: Fire-and-forget worker
+
+```json
+{
+  "task": "Run the test suite in the project directory and report any failures",
+  "interactive": false
+}
+```
+
+### Example: Interactive coding session
+
+```json
+{
+  "task": "Help me refactor the authentication module. Start by analyzing the current structure.",
+  "interactive": true,
+  "worker_type": "opencode",
+  "directory": "/home/user/project"
+}
+```
+
+---
+
+## route
+
+Send a follow-up message to an interactive worker. Only works with workers spawned with `interactive: true`.
+
+<ParamField path="worker_id" type="string" required>
+  The worker ID (UUID format) from the `spawn_worker` result
+</ParamField>
+
+<ParamField path="message" type="string" required>
+  The message to send to the worker
+</ParamField>
+
+<ResponseField name="routed" type="boolean">
+  Whether the message was delivered
+</ResponseField>
+
+<ResponseField name="worker_id" type="string">
+  The worker ID
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message
+</ResponseField>
+
+### Example
+
+```json
+{
+  "worker_id": "550e8400-e29b-41d4-a716-446655440000",
+  "message": "Now update the tests to match the new authentication flow"
+}
+```
+
+---
+
+## cancel
+
+Stop a running worker or branch. Use when the process is no longer needed or has gone off track.
+
+<ParamField path="process_type" type="string" required>
+  Type of process to cancel: `"worker"` or `"branch"`
+</ParamField>
+
+<ParamField path="process_id" type="string" required>
+  The UUID of the worker or branch to cancel
+</ParamField>
+
+<ParamField path="reason" type="string">
+  Optional reason for cancellation (logged)
+</ParamField>
+
+<ResponseField name="cancelled" type="boolean">
+  Whether the cancellation was successful
+</ResponseField>
+
+<ResponseField name="process_type" type="string">
+  The type of process that was cancelled
+</ResponseField>
+
+<ResponseField name="process_id" type="string">
+  The process ID
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message
+</ResponseField>
+
+### Example
+
+```json
+{
+  "process_type": "worker",
+  "process_id": "550e8400-e29b-41d4-a716-446655440000",
+  "reason": "User requested different approach"
+}
+```
+
+---
+
+## skip
+
+Produce no response to the user. Use when a message doesn't warrant a reply (e.g., lurking in group chat, message wasn't directed at you).
+
+<ParamField path="reason" type="string">
+  Brief internal reason for skipping (logged but not sent to the user)
+</ParamField>
+
+<ResponseField name="skipped" type="boolean">
+  Always true when the tool succeeds
+</ResponseField>
+
+### Example
+
+```json
+{
+  "reason": "General conversation in group chat, not directed at me"
+}
+```
+
+<Note>
+Calling `skip` suppresses all output for this turn and cancels the typing indicator.
+</Note>
+
+---
+
+## react
+
+Add an emoji reaction to the message. Quick, non-verbal acknowledgment.
+
+<ParamField path="emoji" type="string" required>
+  A single unicode emoji character (e.g., "👍", "😂", "🔥", "👀")
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the reaction was added
+</ResponseField>
+
+<ResponseField name="emoji" type="string">
+  The emoji that was used
+</ResponseField>
+
+### Example
+
+```json
+{
+  "emoji": "👍"
+}
+```
+
+---
+
+## cron
+
+Manage scheduled recurring tasks. Create, list, or delete cron jobs that run at specified intervals or on cron schedules.
+
+<ParamField path="action" type="string" required>
+  The operation: `"create"`, `"list"`, or `"delete"`
+</ParamField>
+
+<ParamField path="id" type="string">
+  For create: a short unique ID (e.g., "check-email", "daily-summary"). For delete: the ID to remove. Must be 1-50 characters, alphanumeric with hyphens and underscores only.
+</ParamField>
+
+<ParamField path="prompt" type="string">
+  For create: the instruction to execute on each run. Maximum 10,000 characters.
+</ParamField>
+
+<ParamField path="cron_expr" type="string">
+  For create: strict wall-clock cron expression (5-field syntax, e.g., "0 9 * * *" for daily at 09:00). Takes precedence over interval_secs.
+</ParamField>
+
+<ParamField path="interval_secs" type="integer">
+  For create: seconds between runs (minimum 60). Examples: 3600 = hourly, 86400 = daily.
+</ParamField>
+
+<ParamField path="delivery_target" type="string">
+  For create: where to send results, format "adapter:target" (e.g., "discord:123456789" for DM, "discord:channel_id" for server). Defaults to current conversation.
+</ParamField>
+
+<ParamField path="active_start_hour" type="integer">
+  For create: hour (0-23) when the job becomes active
+</ParamField>
+
+<ParamField path="active_end_hour" type="integer">
+  For create: hour (0-23) when the job becomes inactive
+</ParamField>
+
+<ParamField path="timeout_secs" type="integer" default={120}>
+  For create: maximum seconds to wait for the job to complete. Use larger values (e.g., 600) for long-running research or writing tasks.
+</ParamField>
+
+<ParamField path="run_once" type="boolean" default={false}>
+  For create: if true, run this job once and auto-disable after the first execution.
+</ParamField>
+
+<ParamField path="delete_id" type="string">
+  For delete: the ID of the cron job to remove (alternative to `id`)
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the operation succeeded
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message
+</ResponseField>
+
+<ResponseField name="jobs" type="array">
+  For list: array of cron job entries with id, prompt, interval_secs, delivery_target, run_once, and active_hours
+</ResponseField>
+
+### Example: Create daily summary
+
+```json
+{
+  "action": "create",
+  "id": "daily-summary",
+  "prompt": "Generate a summary of today's conversations and send it to the user",
+  "cron_expr": "0 18 * * *",
+  "delivery_target": "discord:dm:123456789",
+  "timeout_secs": 300
+}
+```
+
+### Example: List all jobs
+
+```json
+{
+  "action": "list"
+}
+```

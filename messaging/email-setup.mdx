@@ -1,0 +1,271 @@
+---
+title: Email Setup
+description: Connect Spacebot to email with IMAP polling and SMTP delivery.
+---
+
+Connect Spacebot to email for conversations via IMAP and SMTP. Takes about 10 minutes.
+
+You need:
+- **IMAP credentials** (host, port, username, password)
+- **SMTP credentials** (host, port, username, password)
+- **From address** for sending emails
+
+## Step 1: Gather Email Credentials
+
+You'll need IMAP and SMTP settings from your email provider. Here are common configurations:
+
+<AccordionGroup>
+  <Accordion title="Gmail">
+    **IMAP:**
+    - Host: `imap.gmail.com`
+    - Port: `993`
+    - Use TLS: `true`
+
+    **SMTP:**
+    - Host: `smtp.gmail.com`
+    - Port: `587`
+    - Use STARTTLS: `true`
+
+    <Warning>
+    Gmail requires an **App Password** if you have 2FA enabled. Generate one at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Outlook / Office 365">
+    **IMAP:**
+    - Host: `outlook.office365.com`
+    - Port: `993`
+    - Use TLS: `true`
+
+    **SMTP:**
+    - Host: `smtp.office365.com`
+    - Port: `587`
+    - Use STARTTLS: `true`
+  </Accordion>
+
+  <Accordion title="Fastmail">
+    **IMAP:**
+    - Host: `imap.fastmail.com`
+    - Port: `993`
+    - Use TLS: `true`
+
+    **SMTP:**
+    - Host: `smtp.fastmail.com`
+    - Port: `587`
+    - Use STARTTLS: `true`
+  </Accordion>
+</AccordionGroup>
+
+## Step 2: Add Credentials to Spacebot
+
+<Tabs>
+  <Tab title="TOML Config">
+    ```toml config.toml
+    [messaging.email]
+    enabled = true
+    
+    # IMAP settings
+    imap_host = "imap.gmail.com"
+    imap_port = 993
+    imap_username = "your-email@gmail.com"
+    imap_password = "your-app-password"
+    imap_use_tls = true
+    
+    # SMTP settings
+    smtp_host = "smtp.gmail.com"
+    smtp_port = 587
+    smtp_username = "your-email@gmail.com"
+    smtp_password = "your-app-password"
+    smtp_use_starttls = true
+    
+    # From address
+    from_address = "your-email@gmail.com"
+    from_name = "Spacebot"
+    
+    [[bindings]]
+    agent_id = "main"
+    channel = "email"
+    ```
+
+    You can also reference environment variables:
+
+    ```toml config.toml
+    [messaging.email]
+    enabled = true
+    imap_username = "env:EMAIL_USERNAME"
+    imap_password = "env:EMAIL_PASSWORD"
+    smtp_username = "env:EMAIL_USERNAME"
+    smtp_password = "env:EMAIL_PASSWORD"
+    from_address = "env:EMAIL_FROM_ADDRESS"
+    ```
+  </Tab>
+</Tabs>
+
+## Step 3: Configure Polling
+
+By default, Spacebot polls the INBOX folder every 60 seconds. You can customize this:
+
+```toml config.toml
+[messaging.email]
+poll_interval_secs = 30  # Poll every 30 seconds
+folders = ["INBOX", "Support", "Urgent"]  # Multiple folders
+```
+
+<Info>
+The minimum poll interval is 5 seconds. Lower values may trigger rate limits from your email provider.
+</Info>
+
+## Step 4: Test the Connection
+
+Send an email to your configured address. Spacebot should:
+
+1. Poll the inbox within the configured interval
+2. Process the email and send a reply
+
+Check the Spacebot logs if you don't receive a reply.
+
+## Sender Filtering
+
+By default, Spacebot processes emails from any sender. To restrict to specific senders:
+
+```toml config.toml
+[messaging.email]
+allowed_senders = [
+  "user@example.com",       # Exact email match
+  "@company.com",           # Any email from this domain
+  "company.com"             # Same as @company.com
+]
+```
+
+Emails from unlisted senders are silently ignored.
+
+## Threading
+
+Spacebot detects email threads using `In-Reply-To` and `References` headers. Replies in the same thread map to the same conversation.
+
+Each thread gets a unique conversation ID based on:
+1. The first `Message-ID` in the `References` chain, or
+2. The `In-Reply-To` header, or
+3. A hash of the subject + sender
+
+This ensures that reply chains maintain context across multiple exchanges.
+
+## Attachments
+
+Spacebot supports sending and receiving file attachments:
+
+- **Receiving:** Attachments are listed in `MessageContent::Media` with filenames
+- **Sending:** Use `OutboundResponse::File` to attach files to replies
+
+```toml config.toml
+[messaging.email]
+max_body_bytes = 102400        # 100KB max email body
+max_attachment_bytes = 10485760 # 10MB max attachment size
+```
+
+Attachments exceeding the limit are rejected with an error.
+
+## Auto-Generated Email Filtering
+
+Spacebot automatically ignores auto-generated emails:
+
+- Bounce messages (`Auto-Submitted: auto-replied`)
+- Out-of-office replies (`Precedence: auto_reply`)
+- Mailing list digests (`Precedence: bulk`)
+- System notifications (`X-Autoreply` header present)
+
+This prevents the bot from responding to automated messages and creating loops.
+
+## HTML Emails
+
+Spacebot automatically converts HTML emails to plain text:
+
+- HTML tags are stripped
+- Common entities (`&nbsp;`, `&amp;`, etc.) are decoded
+- Whitespace is normalized
+
+If both plain text and HTML parts exist, the plain text is used.
+
+## Multiple Folders
+
+Poll multiple IMAP folders simultaneously:
+
+```toml config.toml
+[messaging.email]
+folders = ["INBOX", "Support", "Urgent"]
+```
+
+Each folder is polled sequentially during each poll cycle. Emails are marked as seen after successful processing.
+
+## Limitations
+
+- **No streaming** — Email doesn't support real-time streaming; responses are sent as complete messages.
+- **Polling delay** — Responses arrive after the next poll cycle (default 60 seconds).
+- **No reactions** — Email doesn't support emoji reactions or status indicators.
+- **No history backfill** — Only new unseen emails are processed; existing emails are not backfilled.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `Authentication failed` | Wrong credentials | Verify username and password; check if app password is required |
+| `TLS handshake failed` | Wrong TLS setting | Gmail/Outlook use `imap_use_tls = true` for IMAP and `smtp_use_starttls = true` for SMTP |
+| Bot doesn't see new emails | Poll interval too long | Reduce `poll_interval_secs` or manually trigger a poll |
+| Emails not marked as seen | IMAP permissions | Ensure the account has write permissions on the mailbox |
+| Replies not sending | SMTP auth failed | Verify SMTP credentials; check if 2FA app password is required |
+| Attachment upload fails | Size limit exceeded | Reduce file size or increase `max_attachment_bytes` |
+| Auto-reply loop | Auto-generated filter disabled | Enable auto-generated filtering (enabled by default) |
+
+## Advanced Configuration
+
+### Multiple Email Accounts
+
+Run multiple email instances with different credentials:
+
+```toml config.toml
+[messaging.email]
+imap_host = "imap.gmail.com"
+imap_username = "support@example.com"
+imap_password = "env:SUPPORT_EMAIL_PASSWORD"
+from_address = "support@example.com"
+
+[[messaging.email.instances]]
+runtime_key = "sales-email"
+imap_host = "imap.gmail.com"
+imap_username = "sales@example.com"
+imap_password = "env:SALES_EMAIL_PASSWORD"
+from_address = "sales@example.com"
+
+[[bindings]]
+agent_id = "support-bot"
+channel = "email"  # Primary instance
+
+[[bindings]]
+agent_id = "sales-bot"
+channel = "email"
+adapter = "sales-email"  # Named instance
+```
+
+### Custom Headers
+
+All emails sent by Spacebot include proper threading headers:
+
+- `In-Reply-To`: References the message being replied to
+- `References`: Full chain of message IDs in the thread
+- `Message-ID`: Generated for each sent email
+
+These ensure replies thread correctly in all email clients.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configure Filters" icon="filter" href="/messaging/email-setup#sender-filtering">
+    Restrict who can send emails to the bot
+  </Card>
+  <Card title="Threading" icon="comments" href="/messaging/email-setup#threading">
+    Understand how email threads work
+  </Card>
+  <Card title="Agent Configuration" icon="robot" href="/core/agents">
+    Route different email addresses to different agents
+  </Card>
+</CardGroup>

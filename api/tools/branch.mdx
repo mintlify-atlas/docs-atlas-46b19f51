@@ -1,0 +1,215 @@
+---
+title: Branch Tools
+description: Tools available to branch processes for memory operations and cross-channel recall
+---
+
+Branches are forked copies of channel context that think independently. They have access to the full conversation history at fork time and specialize in memory work and research.
+
+## memory_recall
+
+Search and retrieve memories using hybrid search (semantic similarity + full-text + graph traversal). Memories are automatically curated and ranked by relevance.
+
+<ParamField path="query" type="string">
+  Search query for hybrid mode. Required for hybrid mode, ignored for other modes.
+</ParamField>
+
+<ParamField path="max_results" type="integer" default={10}>
+  Maximum number of memories to return (1-50)
+</ParamField>
+
+<ParamField path="memory_type" type="string">
+  Filter to a specific memory type. Required for "typed" mode, optional filter for other modes.
+  
+  Valid types: `fact`, `preference`, `decision`, `identity`, `event`, `observation`, `goal`, `todo`
+</ParamField>
+
+<ParamField path="mode" type="string" default="hybrid">
+  Search mode:
+  - `"hybrid"`: Semantic + keyword + graph traversal (needs query)
+  - `"recent"`: Most recent by creation time
+  - `"important"`: Highest importance scores
+  - `"typed"`: Filter by memory_type
+</ParamField>
+
+<ParamField path="sort_by" type="string" default="recent">
+  Sort order for non-hybrid modes: `"recent"`, `"importance"`, or `"most_accessed"`
+</ParamField>
+
+<ResponseField name="memories" type="array">
+  Array of memory objects with id, content, memory_type, importance, created_at, and relevance_score
+</ResponseField>
+
+<ResponseField name="total_found" type="integer">
+  Total number of results before curation
+</ResponseField>
+
+<ResponseField name="summary" type="string">
+  Formatted markdown summary of the memories for LLM consumption
+</ResponseField>
+
+### Example: Hybrid search
+
+```json
+{
+  "query": "API rate limits and throttling strategies",
+  "max_results": 15,
+  "mode": "hybrid"
+}
+```
+
+### Example: Recent identity memories
+
+```json
+{
+  "memory_type": "identity",
+  "mode": "typed",
+  "sort_by": "recent",
+  "max_results": 10
+}
+```
+
+<Tip>
+Memory recall automatically records access timestamps and updates importance scores based on retrieval frequency.
+</Tip>
+
+---
+
+## memory_save
+
+Write a new memory to the store. Memories are automatically embedded and indexed for hybrid search. Similar memories (>0.9 similarity) are auto-linked as updates.
+
+<ParamField path="content" type="string" required>
+  The memory content to save. Be concise but complete. Maximum 50,000 bytes.
+</ParamField>
+
+<ParamField path="memory_type" type="string" default="fact">
+  The type of memory: `fact`, `preference`, `decision`, `identity`, `event`, `observation`, `goal`, or `todo`
+</ParamField>
+
+<ParamField path="importance" type="number">
+  Optional importance score (0.0-1.0). Higher values are recalled more easily. If not provided, uses type-specific defaults.
+</ParamField>
+
+<ParamField path="source" type="string">
+  Optional source information (e.g., "user stated", "inferred from conversation", "system observation")
+</ParamField>
+
+<ParamField path="channel_id" type="string">
+  Optional channel ID to associate this memory with the conversation it came from
+</ParamField>
+
+<ParamField path="associations" type="array">
+  Optional associations to link this memory to other memories. Each association has:
+  - `target_id` (string, required): The memory ID to link to
+  - `relation_type` (string): `related_to`, `updates`, `contradicts`, `caused_by`, `result_of`, or `part_of` (default: `related_to`)
+  - `weight` (number): Strength of association 0.0-1.0 (default: 0.5)
+</ParamField>
+
+<ResponseField name="memory_id" type="string">
+  The UUID of the saved memory
+</ResponseField>
+
+<ResponseField name="success" type="boolean">
+  Whether the save was successful
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message
+</ResponseField>
+
+### Example: Save a user preference
+
+```json
+{
+  "content": "User prefers concise responses without preambles. Wants direct answers followed by explanations if needed.",
+  "memory_type": "preference",
+  "importance": 0.9,
+  "source": "user stated explicitly"
+}
+```
+
+### Example: Save with associations
+
+```json
+{
+  "content": "Decided to use exponential backoff for API retries with max 5 attempts",
+  "memory_type": "decision",
+  "importance": 0.8,
+  "associations": [
+    {
+      "target_id": "prev-memory-id",
+      "relation_type": "updates",
+      "weight": 0.9
+    }
+  ]
+}
+```
+
+<Note>
+Memories with `identity` type are exempt from decay and remain permanently accessible.
+</Note>
+
+---
+
+## channel_recall
+
+Retrieve conversation transcript from other channels. Useful for cross-conversation context or summarizing activity.
+
+<ParamField path="channel" type="string">
+  Channel name (e.g., "general", "dev") or full channel ID (e.g., "discord:123:456"). If omitted, lists all available channels instead.
+</ParamField>
+
+<ParamField path="limit" type="integer" default={50}>
+  Maximum number of messages to return (1-100)
+</ParamField>
+
+<ResponseField name="action" type="string">
+  The action performed: `"transcript"` or `"list"`
+</ResponseField>
+
+<ResponseField name="channel_id" type="string">
+  The resolved channel ID (when querying a specific channel)
+</ResponseField>
+
+<ResponseField name="channel_name" type="string">
+  The display name of the channel
+</ResponseField>
+
+<ResponseField name="messages" type="array">
+  Array of transcript messages with role, sender, content, and timestamp
+</ResponseField>
+
+<ResponseField name="available_channels" type="array">
+  When listing: array of channel entries with channel_id, channel_name, and last_activity
+</ResponseField>
+
+<ResponseField name="summary" type="string">
+  Formatted markdown summary for LLM consumption
+</ResponseField>
+
+### Example: Get transcript
+
+```json
+{
+  "channel": "general",
+  "limit": 20
+}
+```
+
+### Example: List all channels
+
+```json
+{}
+```
+
+<Tip>
+Channel recall supports partial name matching. Searching for "dev" will find "#dev-team" if it's the best match.
+</Tip>
+
+---
+
+## spawn_worker
+
+Branches can spawn workers for task execution. See the [channel tools](/api/tools/channel#spawn_worker) documentation for full details.
+
+Branches spawn workers the same way channels do, but typically for focused research or data processing tasks rather than user interaction.

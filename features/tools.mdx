@@ -1,0 +1,491 @@
+---
+title: 'LLM Tools'
+description: 'Available tools for different agent processes in Spacebot'
+---
+
+Spacebot provides specialized tools to different process types. Tools are organized by function, not by consumer—each agent process gets exactly the tools it needs for its role.
+
+## Tool Server Topology
+
+You configure which tools go to which processes via ToolServer factory functions. Each process type has its own tool set:
+
+<CardGroup cols={2}>
+  <Card title="Channel Tools" icon="comments">
+    User-facing conversation management
+  </Card>
+  <Card title="Branch Tools" icon="code-branch">
+    Memory and research operations
+  </Card>
+  <Card title="Worker Tools" icon="wrench">
+    Task execution and file operations
+  </Card>
+  <Card title="Cortex Tools" icon="brain">
+    System-level memory consolidation
+  </Card>
+</CardGroup>
+
+## Channel Tools
+
+Channels get conversation management tools. These hold per-turn state and are added dynamically at the start of each conversation turn.
+
+### reply
+
+Send a message to the user.
+
+<ParamField path="text" type="string" required>
+  The message text to send
+</ParamField>
+
+```rust src/tools/reply.rs
+pub struct ReplyTool {
+    response_tx: mpsc::Sender<OutboundResponse>,
+    conversation_id: String,
+    conversation_logger: ConversationLogger,
+    channel_id: ChannelId,
+    replied_flag: RepliedFlag,
+    agent_display_name: String,
+}
+```
+
+### branch
+
+Fork the channel's context to think or research independently.
+
+<ParamField path="task" type="string" required>
+  What you need the branch to figure out
+</ParamField>
+
+<ParamField path="max_turns" type="integer">
+  Maximum thinking iterations (default: 10)
+</ParamField>
+
+```rust src/agent/branch.rs
+// Branch gets full channel history at fork time
+let branch_history = channel_history.clone();
+```
+
+### spawn_worker
+
+Create an independent worker to execute a task.
+
+<ParamField path="task" type="string" required>
+  The work to delegate
+</ParamField>
+
+<ParamField path="mode" type="string">
+  Either `fire_and_forget` (default) or `interactive`
+</ParamField>
+
+<ParamField path="timeout_seconds" type="integer">
+  Maximum execution time (1-3600 seconds)
+</ParamField>
+
+<Tabs>
+  <Tab title="Fire-and-forget">
+    ```json
+    {
+      "task": "Run the test suite and report failures",
+      "mode": "fire_and_forget",
+      "timeout_seconds": 300
+    }
+    ```
+    Worker returns a result and terminates.
+  </Tab>
+  <Tab title="Interactive">
+    ```json
+    {
+      "task": "Help me debug this authentication flow",
+      "mode": "interactive"
+    }
+    ```
+    Worker stays alive for follow-up questions.
+  </Tab>
+</Tabs>
+
+### route
+
+Send follow-up input to an active interactive worker.
+
+<ParamField path="worker_id" type="string" required>
+  The worker UUID
+</ParamField>
+
+<ParamField path="message" type="string" required>
+  Follow-up instruction or question
+</ParamField>
+
+### cancel
+
+Stop a running worker or branch.
+
+<ParamField path="process_id" type="string" required>
+  Worker ID or branch ID to cancel
+</ParamField>
+
+### skip
+
+Opt out of responding this turn (silent action).
+
+```json
+{
+  "reason": "User is thinking out loud, no response needed"
+}
+```
+
+### react
+
+Add an emoji reaction instead of a text reply.
+
+<ParamField path="emoji" type="string" required>
+  Emoji character or name (e.g., "👍" or "thumbs_up")
+</ParamField>
+
+## Branch Tools
+
+Branches get memory and research tools. No channel context, just focused investigation.
+
+### memory_save
+
+Write a structured memory to the graph.
+
+<ParamField path="content" type="string" required>
+  The memory content
+</ParamField>
+
+<ParamField path="memory_type" type="string" required>
+  One of: `fact`, `preference`, `decision`, `identity`, `event`, `observation`
+</ParamField>
+
+<ParamField path="importance" type="number">
+  Decay resistance score (0.0-1.0, default: 0.5)
+</ParamField>
+
+<ParamField path="associations" type="array">
+  Related memory IDs with relationship types
+</ParamField>
+
+<CodeGroup>
+```json Example: Fact
+{
+  "content": "User prefers dark mode for all applications",
+  "memory_type": "preference",
+  "importance": 0.8
+}
+```
+
+```json Example: Decision
+{
+  "content": "Migrated from PostgreSQL to SQLite for simpler deployment",
+  "memory_type": "decision",
+  "importance": 0.9,
+  "associations": [
+    {"memory_id": "abc-123", "relation_type": "updates"}
+  ]
+}
+```
+</CodeGroup>
+
+### memory_recall
+
+Search the memory graph using hybrid vector + full-text search.
+
+<ParamField path="query" type="string" required>
+  Search query
+</ParamField>
+
+<ParamField path="limit" type="integer">
+  Max results to return (default: 20)
+</ParamField>
+
+<ParamField path="memory_types" type="array">
+  Filter by types: `["fact", "decision"]`
+</ParamField>
+
+<ParamField path="min_importance" type="number">
+  Minimum importance threshold
+</ParamField>
+
+```rust src/memory/search.rs
+// Hybrid search with RRF (Reciprocal Rank Fusion)
+let results = memory_search.search(query, limit).await?;
+// Vector similarity + full-text + graph traversal
+```
+
+### memory_delete
+
+Remove memories by ID or content match.
+
+<ParamField path="memory_ids" type="array">
+  Specific memory IDs to delete
+</ParamField>
+
+<ParamField path="content_match" type="string">
+  Delete memories containing this text
+</ParamField>
+
+### channel_recall
+
+Retrieve conversation history from other channels.
+
+<ParamField path="channel_id" type="string">
+  Specific channel ID
+</ParamField>
+
+<ParamField path="limit" type="integer">
+  Number of recent messages (default: 50)
+</ParamField>
+
+### task_create
+
+Create a structured task with optional subtasks.
+
+<ParamField path="title" type="string" required>
+  Short task title
+</ParamField>
+
+<ParamField path="description" type="string">
+  Detailed description
+</ParamField>
+
+<ParamField path="priority" type="string">
+  One of: `low`, `medium`, `high`, `urgent`
+</ParamField>
+
+<ParamField path="subtasks" type="array">
+  Checklist items as strings
+</ParamField>
+
+<ParamField path="status" type="string">
+  Initial status: `backlog`, `todo`, `in_progress`, `done`, `cancelled`
+</ParamField>
+
+### task_list
+
+Query tasks with filters.
+
+<ParamField path="status" type="string">
+  Filter by status
+</ParamField>
+
+<ParamField path="priority" type="string">
+  Filter by priority
+</ParamField>
+
+<ParamField path="limit" type="integer">
+  Max results (default: 50)
+</ParamField>
+
+### task_update
+
+Update task fields or subtasks.
+
+<ParamField path="task_number" type="integer" required>
+  Task number to update
+</ParamField>
+
+<ParamField path="status" type="string">
+  New status
+</ParamField>
+
+<ParamField path="priority" type="string">
+  New priority
+</ParamField>
+
+<ParamField path="subtask_updates" type="array">
+  Mark subtasks as completed
+</ParamField>
+
+## Worker Tools
+
+Workers get file and execution tools. Fresh prompt per worker—no channel history.
+
+### shell
+
+Execute shell commands in a sandboxed environment.
+
+<ParamField path="command" type="string" required>
+  Shell command to run (via `sh -c` on Unix, `cmd /C` on Windows)
+</ParamField>
+
+<ParamField path="working_dir" type="string">
+  Working directory (must be within workspace)
+</ParamField>
+
+<ParamField path="timeout_seconds" type="integer">
+  Command timeout (1-300 seconds, default: 60)
+</ParamField>
+
+```json
+{
+  "command": "cargo test --all",
+  "working_dir": "projects/api",
+  "timeout_seconds": 180
+}
+```
+
+Output includes exit code, stdout, stderr, and a formatted summary.
+
+### file
+
+Read, write, or list files. All paths restricted to workspace.
+
+<Tabs>
+  <Tab title="Read">
+    ```json
+    {
+      "operation": "read",
+      "path": "src/main.rs"
+    }
+    ```
+    Returns file content, truncated if over 50KB.
+  </Tab>
+  <Tab title="Write">
+    ```json
+    {
+      "operation": "write",
+      "path": "notes.md",
+      "content": "# Project Notes\n\nInitial setup complete.",
+      "create_dirs": true
+    }
+    ```
+    Creates parent directories by default.
+  </Tab>
+  <Tab title="List">
+    ```json
+    {
+      "operation": "list",
+      "path": "src"
+    }
+    ```
+    Returns up to 500 directory entries with name, type, and size.
+  </Tab>
+</Tabs>
+
+<Warning>
+  **Security:** Symlinks are blocked. Paths outside the workspace return `ACCESS DENIED` with instructions—never fabricate file contents.
+</Warning>
+
+### exec
+
+Run subprocesses with full argument and environment control.
+
+<ParamField path="program" type="string" required>
+  Binary name (e.g., `cargo`, `python`, `node`)
+</ParamField>
+
+<ParamField path="args" type="array">
+  Command arguments
+</ParamField>
+
+<ParamField path="working_dir" type="string">
+  Working directory
+</ParamField>
+
+<ParamField path="env" type="array">
+  Environment variables as `{"key": "NAME", "value": "VALUE"}`
+</ParamField>
+
+<ParamField path="timeout_seconds" type="integer">
+  Execution timeout (1-300 seconds, default: 60)
+</ParamField>
+
+```json
+{
+  "program": "python",
+  "args": ["train.py", "--epochs", "10"],
+  "working_dir": "ml",
+  "env": [{"key": "CUDA_VISIBLE_DEVICES", "value": "0"}],
+  "timeout_seconds": 600
+}
+```
+
+<Note>
+  Dangerous env vars (`LD_PRELOAD`, `PYTHONPATH`, `NODE_OPTIONS`, etc.) are blocked for security.
+</Note>
+
+### set_status
+
+Update the worker's visible status.
+
+<ParamField path="status" type="string" required>
+  Status message (e.g., "running tests", "compiling", "analyzing logs")
+</ParamField>
+
+```json
+{"status": "installing dependencies"}
+```
+
+Status appears in the channel's status block and worker inspection output.
+
+## MCP Tools
+
+Model Context Protocol tools are dynamically loaded from configured MCP servers. Available to workers only.
+
+```toml agent.toml
+[[mcp]]
+name = "filesystem"
+enabled = true
+
+[mcp.transport]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+```
+
+MCP tools appear in the worker's tool list with the server name prefix. See [MCP Integration](/features/mcp) for details.
+
+## Tool Output Limits
+
+<Info>
+  Tool outputs are truncated to **50KB** to fit within LLM context windows. If you hit truncation:
+  - Use `head`/`tail` for specific sections
+  - Pipe commands through filters
+  - Read files with offset/limit parameters
+</Info>
+
+Truncated output includes a notice with the original size and instructions for accessing the rest.
+
+## Error-as-Result Pattern
+
+Tool errors return as structured results, not exceptions. The LLM sees the error and can recover:
+
+```json
+{
+  "success": false,
+  "error": "File not found: config.json",
+  "path": "config.json"
+}
+```
+
+This lets the agent try alternative approaches instead of crashing the process.
+
+## Adding Custom Tools
+
+Implement the `rig::tool::Tool` trait:
+
+```rust
+use rig::tool::Tool;
+use rig::completion::ToolDefinition;
+
+#[derive(Debug, Clone)]
+pub struct CustomTool {
+    // your fields
+}
+
+impl Tool for CustomTool {
+    const NAME: &'static str = "custom";
+    type Error = CustomError;
+    type Args = CustomArgs;
+    type Output = CustomOutput;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        // JSON Schema for args
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        // implementation
+    }
+}
+```
+
+Register in the appropriate factory function (`create_worker_tool_server`, `create_branch_tool_server`, etc.).

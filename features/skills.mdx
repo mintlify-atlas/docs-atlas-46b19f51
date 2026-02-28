@@ -1,0 +1,369 @@
+---
+title: 'Skills System'
+description: 'Reusable instruction sets for specialized workflows'
+---
+
+Skills are directories containing a `SKILL.md` file with instructions and metadata. They're compatible with OpenClaw's skill format and the skills.sh registry.
+
+## What Are Skills?
+
+Skills are reusable instruction sets that teach agents how to perform specific tasks:
+
+- **OpenClaw-compatible**: Use existing skills from the skills.sh registry
+- **Markdown-based**: Instructions in a `SKILL.md` file with YAML frontmatter
+- **Bundled resources**: Include scripts, templates, or reference files in the skill directory
+- **Agent-scoped**: Load different skills per agent via workspace vs. instance directories
+
+## Skill Structure
+
+```
+skills/
+  weather/
+    SKILL.md          # Instructions + metadata
+    example.sh        # Optional: bundled scripts
+  github/
+    SKILL.md
+    workflow.yml      # Optional: templates
+```
+
+### SKILL.md Format
+
+```markdown
+---
+name: weather
+description: Get current weather and forecasts (no API key required).
+homepage: https://wttr.in/:help
+source_repo: skills/weather
+---
+
+# Weather Skill
+
+Use wttr.in for free weather data:
+
+```bash
+curl "wttr.in/San%20Francisco?format=3"
+```
+
+For detailed forecasts:
+
+```bash
+curl "wttr.in/San%20Francisco"
+```
+
+No authentication required.
+```
+
+<ParamField path="name" type="string" required>
+  Skill identifier (used for lookups, case-insensitive)
+</ParamField>
+
+<ParamField path="description" type="string" required>
+  Short summary shown in skill listings
+</ParamField>
+
+<ParamField path="homepage" type="string">
+  URL for documentation or tool homepage
+</ParamField>
+
+<ParamField path="source_repo" type="string">
+  GitHub repo if installed from a registry (format: `owner/repo`)
+</ParamField>
+
+## Loading Skills
+
+Skills load from two locations (workspace wins on name conflicts):
+
+1. **Instance-level**: `{instance_dir}/skills/` — shared across all agents
+2. **Agent workspace**: `{workspace}/skills/` — agent-specific overrides
+
+```rust src/skills.rs
+impl SkillSet {
+    pub async fn load(instance_skills_dir: &Path, workspace_skills_dir: &Path) -> Self {
+        // Instance skills (lowest precedence)
+        // Workspace skills (highest precedence, overrides instance)
+    }
+}
+```
+
+Skills are loaded at agent startup. Reload via the API to pick up changes without restarting.
+
+## Installing Skills
+
+Install from GitHub repos or local files:
+
+### From GitHub
+
+```bash
+curl -X POST http://localhost:3000/api/agents/spacebot/skills \
+  -H "Content-Type: application/json" \
+  -d '{"source": "github:anomalyco/skills/weather"}'
+```
+
+Format: `github:{owner}/{repo}/{skill_name}`
+
+This clones the repo, extracts the skill directory, and installs to the workspace.
+
+### From Local File
+
+Upload a `.tar.gz` or `.zip` archive:
+
+```bash
+curl -X POST http://localhost:3000/api/agents/spacebot/skills \
+  -F "file=@weather-skill.tar.gz"
+```
+
+The archive must contain a `SKILL.md` at its root or in a single top-level directory.
+
+### Manual Installation
+
+Create a directory in workspace skills folder:
+
+```bash
+mkdir -p ~/spacebot-data/agents/spacebot/workspace/skills/weather
+cat > ~/spacebot-data/agents/spacebot/workspace/skills/weather/SKILL.md <<'EOF'
+---
+name: weather
+description: Get weather forecasts
+---
+
+# Weather Skill
+
+Use curl to fetch weather from wttr.in...
+EOF
+```
+
+Reload skills via the API:
+
+```bash
+curl -X POST http://localhost:3000/api/agents/spacebot/reload
+```
+
+## Using Skills
+
+Skills are injected into system prompts differently for channels vs. workers:
+
+### Channel Prompt
+
+Channels see a summary with skill names and descriptions. They're instructed to delegate skill work to workers:
+
+```xml
+<available_skills>
+You have access to the following skills. To use a skill, spawn a worker
+and suggest the skill name in the spawn_worker suggested_skills parameter.
+
+<skill>
+  <name>weather</name>
+  <description>Get current weather and forecasts (no API key required).</description>
+  <location>/workspace/skills/weather/SKILL.md</location>
+</skill>
+
+<skill>
+  <name>github</name>
+  <description>Interact with GitHub using the gh CLI.</description>
+  <location>/workspace/skills/github/SKILL.md</location>
+</skill>
+</available_skills>
+```
+
+### Worker Prompt
+
+Workers see the full skill listing with suggested skills flagged. They decide which skills are relevant and read them via the `read_skill` tool:
+
+```xml
+<available_skills>
+You have access to these skills. Use the read_skill tool to load full
+instructions when you need them. Skills marked as suggested="true" were
+recommended for this task.
+
+<skill suggested="true">
+  <name>github</name>
+  <description>Interact with GitHub using the gh CLI.</description>
+  <location>/workspace/skills/github/SKILL.md</location>
+</skill>
+
+<skill>
+  <name>weather</name>
+  <description>Get current weather and forecasts (no API key required).</description>
+  <location>/workspace/skills/weather/SKILL.md</location>
+</skill>
+</available_skills>
+```
+
+Workers call `read_skill` to load the full content:
+
+```json
+{"skill_name": "github"}
+```
+
+Returns the skill's markdown body with `{baseDir}` placeholders resolved to the skill's directory path.
+
+## Template Variables
+
+Skill content supports the `{baseDir}` placeholder:
+
+```markdown SKILL.md
+---
+name: example
+description: Example skill with bundled script
+---
+
+Run the helper script:
+
+```bash
+bash {baseDir}/helper.sh
+```
+```
+
+When read via `read_skill`, `{baseDir}` resolves to the skill's absolute path:
+
+```markdown
+Run the helper script:
+
+```bash
+bash /workspace/skills/example/helper.sh
+```
+```
+
+This lets workers execute bundled scripts or read templates from the skill directory.
+
+## Managing Skills
+
+### List All Skills
+
+```bash
+curl http://localhost:3000/api/agents/spacebot/skills
+```
+
+Returns all loaded skills with metadata:
+
+```json
+{
+  "skills": [
+    {
+      "name": "weather",
+      "description": "Get current weather and forecasts",
+      "file_path": "/workspace/skills/weather/SKILL.md",
+      "base_dir": "/workspace/skills/weather",
+      "source": "workspace",
+      "source_repo": "anomalyco/skills"
+    }
+  ]
+}
+```
+
+### Read Skill Content
+
+```bash
+curl http://localhost:3000/api/agents/spacebot/skills/weather
+```
+
+Returns the skill's full content with baseDir variable resolved.
+
+### Remove a Skill
+
+```bash
+curl -X DELETE http://localhost:3000/api/agents/spacebot/skills/weather
+```
+
+Deletes the skill directory from disk and removes from the loaded set.
+
+## OpenClaw Compatibility
+
+Spacebot skills use the same format as OpenClaw:
+
+- **Frontmatter**: YAML metadata with `name`, `description`, `homepage`, etc.
+- **Body**: Markdown instructions
+- **Bundled files**: Scripts, templates, or reference data in the skill directory
+- **Registry**: Compatible with skills.sh (install via `github:owner/repo/skill`)
+
+Skills created for OpenClaw work in Spacebot without modification.
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Be Explicit" icon="bullseye">
+    Include command examples, expected outputs, and error handling. The LLM follows instructions literally.
+  </Card>
+  <Card title="No API Keys in Skills" icon="key">
+    Use placeholders like `$GITHUB_TOKEN` or `{apiKey}`. Let the agent fetch credentials from its secret store.
+  </Card>
+  <Card title="Test with Workers" icon="flask">
+    Skills are worker-focused. Test by spawning a worker and verifying it can follow the instructions.
+  </Card>
+  <Card title="Bundle Resources" icon="folder">
+    Include scripts, templates, or reference files in the skill directory. Reference them via `{baseDir}`.
+  </Card>
+</CardGroup>
+
+<Warning>
+  **Skills are not sandboxed.** If a skill includes a script, the worker can execute it. Only install skills from trusted sources.
+</Warning>
+
+## Examples
+
+<AccordionGroup>
+  <Accordion title="Weather (No API)">
+    Skill file: `weather/SKILL.md`
+    
+    Use wttr.in for free weather data. No authentication required.
+    
+    Current conditions:
+    ```bash
+    curl "wttr.in/San%20Francisco?format=3"
+    ```
+    
+    Full forecast:
+    ```bash
+    curl "wttr.in/San%20Francisco"
+    ```
+  </Accordion>
+  <Accordion title="GitHub CLI">
+    Skill file: `github/SKILL.md`
+    
+    Use the `gh` CLI for GitHub operations. Authenticate first:
+    
+    ```bash
+    gh auth login
+    ```
+    
+    List pull requests:
+    ```bash
+    gh pr list --repo owner/repo
+    ```
+    
+    Create PR:
+    ```bash
+    gh pr create --title "Title" --body "Description"
+    ```
+    
+    View PR details:
+    ```bash
+    gh pr view 123
+    ```
+  </Accordion>
+  <Accordion title="Docker Compose">
+    Skill file: `docker-compose/SKILL.md`
+    
+    Use Docker Compose for orchestrating containers.
+    
+    Start services:
+    ```bash
+    docker-compose up -d
+    ```
+    
+    View logs:
+    ```bash
+    docker-compose logs -f service_name
+    ```
+    
+    Stop services:
+    ```bash
+    docker-compose down
+    ```
+    
+    Rebuild:
+    ```bash
+    docker-compose up -d --build
+    ```
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,291 @@
+---
+title: Routing Configuration
+description: Configure model routing for different process types and tasks
+---
+
+The routing configuration determines which LLM model each process type uses. You can set defaults in `[defaults.routing]` and override per agent in `[agents.routing]`.
+
+## Process-Type Routing
+
+<ParamField path="channel" type="string" default="anthropic/claude-sonnet-4">
+  Model used by channel processes (user-facing conversations).
+  
+  ```toml
+  [defaults.routing]
+  channel = "anthropic/claude-sonnet-4"
+  ```
+</ParamField>
+
+<ParamField path="branch" type="string" default="anthropic/claude-sonnet-4">
+  Model used by branch processes (forked thinking).
+  
+  ```toml
+  [defaults.routing]
+  branch = "anthropic/claude-sonnet-4"
+  ```
+</ParamField>
+
+<ParamField path="worker" type="string" default="anthropic/claude-sonnet-4">
+  Model used by worker processes (task execution).
+  
+  ```toml
+  [defaults.routing]
+  worker = "anthropic/claude-haiku-4.5"
+  ```
+</ParamField>
+
+<ParamField path="compactor" type="string" default="anthropic/claude-sonnet-4">
+  Model used by compactor processes (context summarization).
+  
+  ```toml
+  [defaults.routing]
+  compactor = "anthropic/claude-haiku-4.5"
+  ```
+</ParamField>
+
+<ParamField path="cortex" type="string" default="anthropic/claude-sonnet-4">
+  Model used by cortex processes (system observation, bulletin generation).
+  
+  ```toml
+  [defaults.routing]
+  cortex = "anthropic/claude-haiku-4.5"
+  ```
+</ParamField>
+
+<ParamField path="voice" type="string">
+  Model used for voice processing (if enabled).
+  
+  ```toml
+  [defaults.routing]
+  voice = "openai/gpt-4.1-mini"
+  ```
+</ParamField>
+
+## Task-Type Overrides
+
+<ParamField path="task_overrides" type="object">
+  Task-specific model overrides for workers and branches. When a worker or branch is spawned with a specific task type, use the override model instead of the default.
+  
+  ```toml
+  [defaults.routing.task_overrides]
+  coding = "anthropic/claude-sonnet-4"
+  research = "openai/gpt-4.1"
+  memory = "anthropic/claude-haiku-4.5"
+  ```
+</ParamField>
+
+## Thinking Effort
+
+<ParamField path="channel_thinking_effort" type="string" default="auto">
+  Thinking effort level for channel models. Controls extended thinking tokens.
+  
+  Valid values: `auto`, `low`, `medium`, `high`
+  
+  ```toml
+  [defaults.routing]
+  channel_thinking_effort = "medium"
+  ```
+</ParamField>
+
+<ParamField path="branch_thinking_effort" type="string" default="auto">
+  Thinking effort level for branch models.
+  
+  ```toml
+  [defaults.routing]
+  branch_thinking_effort = "high"
+  ```
+</ParamField>
+
+<ParamField path="worker_thinking_effort" type="string" default="auto">
+  Thinking effort level for worker models.
+  
+  ```toml
+  [defaults.routing]
+  worker_thinking_effort = "medium"
+  ```
+</ParamField>
+
+<ParamField path="compactor_thinking_effort" type="string" default="auto">
+  Thinking effort level for compactor models.
+  
+  ```toml
+  [defaults.routing]
+  compactor_thinking_effort = "low"
+  ```
+</ParamField>
+
+<ParamField path="cortex_thinking_effort" type="string" default="auto">
+  Thinking effort level for cortex models.
+  
+  ```toml
+  [defaults.routing]
+  cortex_thinking_effort = "medium"
+  ```
+</ParamField>
+
+## Fallback Chains
+
+<ParamField path="fallbacks" type="object">
+  Fallback chains for resilience. When a model fails with a retriable error (429, 502, 503, 504, rate limit), try the next model in its chain.
+  
+  ```toml
+  [defaults.routing.fallbacks]
+  "anthropic/claude-sonnet-4" = ["anthropic/claude-haiku-4.5", "openai/gpt-4.1"]
+  "openai/gpt-4.1" = ["openai/gpt-4.1-mini"]
+  ```
+</ParamField>
+
+<ParamField path="rate_limit_cooldown_secs" type="integer" default="60">
+  How long to deprioritize a rate-limited model (seconds). After a rate limit error, the model is avoided for this duration.
+  
+  ```toml
+  [defaults.routing]
+  rate_limit_cooldown_secs = 120
+  ```
+</ParamField>
+
+## Model Name Format
+
+Model names follow the format `provider/model-id`. The provider must match a configured LLM provider or custom provider.
+
+### Built-in Providers
+
+- `anthropic/` - Anthropic models (e.g., `anthropic/claude-sonnet-4`)
+- `openai/` - OpenAI models (e.g., `openai/gpt-4.1`)
+- `openrouter/` - OpenRouter models (e.g., `openrouter/anthropic/claude-sonnet-4-20250514`)
+- `kilo/` - Kilo Gateway models (e.g., `kilo/anthropic/claude-sonnet-4.5`)
+- `gemini/` - Google Gemini models (e.g., `gemini/gemini-2.0-flash-exp`)
+- `groq/` - Groq models (e.g., `groq/llama-3.3-70b-versatile`)
+- `deepseek/` - DeepSeek models (e.g., `deepseek/deepseek-chat`)
+- `xai/` - xAI models (e.g., `xai/grok-2-latest`)
+- `mistral/` - Mistral AI models (e.g., `mistral/mistral-large-latest`)
+- `together/` - Together AI models
+- `fireworks/` - Fireworks AI models
+- `nvidia/` - NVIDIA NIM models
+- `ollama/` - Ollama models (e.g., `ollama/llama3.3`)
+
+### Custom Providers
+
+For custom providers defined in `[llm.provider.<name>]`, use `<name>/model-id`:
+
+```toml
+[llm.provider.my_proxy]
+api_type = "openai_completions"
+base_url = "https://my-proxy.example.com/v1"
+api_key = "env:MY_PROXY_KEY"
+
+[defaults.routing]
+channel = "my_proxy/gpt-4"
+```
+
+## Examples
+
+### Single Provider (Anthropic)
+
+```toml
+[llm]
+anthropic_key = "env:ANTHROPIC_API_KEY"
+
+[defaults.routing]
+channel = "anthropic/claude-sonnet-4"
+branch = "anthropic/claude-sonnet-4"
+worker = "anthropic/claude-haiku-4.5"
+compactor = "anthropic/claude-haiku-4.5"
+cortex = "anthropic/claude-haiku-4.5"
+```
+
+### Mixed Providers with Task Overrides
+
+```toml
+[llm]
+anthropic_key = "env:ANTHROPIC_API_KEY"
+openai_key = "env:OPENAI_API_KEY"
+
+[defaults.routing]
+channel = "anthropic/claude-sonnet-4"
+branch = "anthropic/claude-sonnet-4"
+worker = "anthropic/claude-haiku-4.5"
+compactor = "openai/gpt-4.1-mini"
+cortex = "openai/gpt-4.1-mini"
+
+[defaults.routing.task_overrides]
+coding = "anthropic/claude-sonnet-4"
+research = "openai/gpt-4.1"
+```
+
+### OpenRouter with Fallbacks
+
+```toml
+[llm]
+openrouter_key = "env:OPENROUTER_API_KEY"
+
+[defaults.routing]
+channel = "openrouter/anthropic/claude-sonnet-4-20250514"
+branch = "openrouter/anthropic/claude-sonnet-4-20250514"
+worker = "openrouter/anthropic/claude-haiku-4.5-20250514"
+compactor = "openrouter/anthropic/claude-haiku-4.5-20250514"
+cortex = "openrouter/anthropic/claude-haiku-4.5-20250514"
+
+[defaults.routing.fallbacks]
+"openrouter/anthropic/claude-sonnet-4-20250514" = [
+  "openrouter/anthropic/claude-haiku-4.5-20250514",
+  "openrouter/google/gemini-2.0-flash-exp"
+]
+```
+
+### Per-Agent Routing Override
+
+```toml
+[defaults.routing]
+channel = "anthropic/claude-haiku-4.5"
+worker = "anthropic/claude-haiku-4.5"
+
+# Default agent uses fast, cheap models
+[[agents]]
+id = "support"
+default = true
+
+# Coding agent uses more powerful models
+[[agents]]
+id = "coding"
+
+[agents.routing]
+channel = "anthropic/claude-sonnet-4"
+worker = "anthropic/claude-sonnet-4"
+
+[agents.routing.task_overrides]
+coding = "anthropic/claude-sonnet-4"
+```
+
+### Thinking Effort Configuration
+
+```toml
+[defaults.routing]
+channel = "anthropic/claude-sonnet-4"
+branch = "anthropic/claude-sonnet-4"
+worker = "anthropic/claude-sonnet-4"
+
+# Use extended thinking for complex tasks
+channel_thinking_effort = "medium"
+branch_thinking_effort = "high"
+worker_thinking_effort = "medium"
+
+# Keep compaction and cortex lightweight
+compactor_thinking_effort = "low"
+cortex_thinking_effort = "low"
+```
+
+## Retriable Errors
+
+The following errors trigger fallback to the next model in the chain:
+
+- HTTP 429 (rate limit)
+- HTTP 502 (bad gateway)
+- HTTP 503 (service unavailable)
+- HTTP 504 (gateway timeout)
+- Connection errors
+- Timeouts
+- Empty responses
+- Malformed responses
+
+Context overflow errors (token limit exceeded) do NOT trigger fallbacks - they trigger compaction instead.

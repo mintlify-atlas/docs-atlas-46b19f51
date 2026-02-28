@@ -1,0 +1,322 @@
+---
+title: Bindings Configuration
+description: Route messaging platform conversations to specific agents
+---
+
+Bindings map messaging platform conversations to agents. Each binding defines which agent handles messages from a specific guild, workspace, channel, or user.
+
+## Binding Definition
+
+<ParamField path="agent_id" type="string" required>
+  ID of the agent that handles messages matching this binding.
+  
+  ```toml
+  [[bindings]]
+  agent_id = "support"
+  ```
+</ParamField>
+
+<ParamField path="channel" type="string" required>
+  Messaging platform. Must match a configured messaging adapter.
+  
+  Valid values: `discord`, `slack`, `telegram`, `email`, `twitch`, `webhook`
+  
+  ```toml
+  [[bindings]]
+  agent_id = "main"
+  channel = "discord"
+  ```
+</ParamField>
+
+<ParamField path="adapter" type="string">
+  Named adapter instance for platforms that support multiple instances (Discord, Slack, Telegram, Email, Twitch).
+  
+  If not set, targets the default adapter credentials.
+  
+  ```toml
+  [[bindings]]
+  agent_id = "support"
+  channel = "discord"
+  adapter = "support_bot"  # Uses messaging.discord.instances[0] where name="support_bot"
+  ```
+</ParamField>
+
+## Platform-Specific Filters
+
+### Discord
+
+<ParamField path="guild_id" type="string">
+  Discord guild (server) ID. Only messages from this guild match this binding.
+  
+  ```toml
+  [[bindings]]
+  agent_id = "community"
+  channel = "discord"
+  guild_id = "123456789012345678"
+  ```
+</ParamField>
+
+<ParamField path="channel_ids" type="array">
+  Discord channel IDs. Only messages from these channels (or threads under these channels) match this binding.
+  
+  If empty, all channels in the guild are allowed.
+  
+  ```toml
+  [[bindings]]
+  agent_id = "support"
+  channel = "discord"
+  guild_id = "123456789012345678"
+  channel_ids = ["987654321098765432", "876543210987654321"]
+  ```
+</ParamField>
+
+<ParamField path="require_mention" type="boolean" default="false">
+  Require explicit @mention or reply-to-bot for inbound messages in guild channels.
+  
+  ```toml
+  [[bindings]]
+  agent_id = "assistant"
+  channel = "discord"
+  guild_id = "123456789012345678"
+  require_mention = true
+  ```
+</ParamField>
+
+<ParamField path="dm_allowed_users" type="array">
+  User IDs allowed to DM the bot through this binding. If empty, DMs are ignored for this binding.
+  
+  ```toml
+  [[bindings]]
+  agent_id = "personal"
+  channel = "discord"
+  dm_allowed_users = ["111222333444555666", "777888999000111222"]
+  ```
+</ParamField>
+
+### Slack
+
+<ParamField path="workspace_id" type="string">
+  Slack workspace (team) ID. Only messages from this workspace match this binding.
+  
+  ```toml
+  [[bindings]]
+  agent_id = "team"
+  channel = "slack"
+  workspace_id = "T01234567"
+  ```
+</ParamField>
+
+<ParamField path="channel_ids" type="array">
+  Slack channel IDs. Only messages from these channels match this binding.
+  
+  If empty, all channels in the workspace are allowed.
+  
+  ```toml
+  [[bindings]]
+  agent_id = "support"
+  channel = "slack"
+  workspace_id = "T01234567"
+  channel_ids = ["C01234567", "C07654321"]
+  ```
+</ParamField>
+
+<ParamField path="dm_allowed_users" type="array">
+  Slack user IDs allowed to DM the bot through this binding.
+  
+  ```toml
+  [[bindings]]
+  agent_id = "personal"
+  channel = "slack"
+  dm_allowed_users = ["U01234567", "U07654321"]
+  ```
+</ParamField>
+
+### Telegram
+
+<ParamField path="chat_id" type="string">
+  Telegram chat ID. Only messages from this chat match this binding.
+  
+  ```toml
+  [[bindings]]
+  agent_id = "group"
+  channel = "telegram"
+  chat_id = "-1001234567890"
+  ```
+</ParamField>
+
+<ParamField path="dm_allowed_users" type="array">
+  Telegram user IDs allowed to DM the bot through this binding.
+  
+  ```toml
+  [[bindings]]
+  agent_id = "personal"
+  channel = "telegram"
+  dm_allowed_users = ["123456789", "987654321"]
+  ```
+</ParamField>
+
+### Twitch
+
+<ParamField path="channel_ids" type="array">
+  Twitch channel names (without the # prefix). Only messages from these channels match this binding.
+  
+  ```toml
+  [[bindings]]
+  agent_id = "stream"
+  channel = "twitch"
+  channel_ids = ["mystreamer", "otherstreamer"]
+  ```
+</ParamField>
+
+## Binding Resolution
+
+Bindings are evaluated in order. The first binding that matches an inbound message determines which agent handles it.
+
+If no binding matches, the message is routed to the default agent (the agent with `default = true`).
+
+## Examples
+
+### Discord Guild Binding
+
+```toml
+[[bindings]]
+agent_id = "community"
+channel = "discord"
+guild_id = "123456789012345678"
+```
+
+This binding routes all messages from Discord guild `123456789012345678` to the `community` agent.
+
+### Discord Channel-Specific Binding
+
+```toml
+[[bindings]]
+agent_id = "support"
+channel = "discord"
+guild_id = "123456789012345678"
+channel_ids = ["987654321098765432"]
+```
+
+This binding routes messages only from channel `987654321098765432` to the `support` agent.
+
+### Discord DM Binding
+
+```toml
+[[bindings]]
+agent_id = "personal"
+channel = "discord"
+dm_allowed_users = ["111222333444555666"]
+```
+
+This binding allows user `111222333444555666` to DM the bot, routed to the `personal` agent.
+
+### Discord with Mention Requirement
+
+```toml
+[[bindings]]
+agent_id = "assistant"
+channel = "discord"
+guild_id = "123456789012345678"
+require_mention = true
+```
+
+Messages in guild channels are only processed if the bot is @mentioned or replied to.
+
+### Slack Workspace Binding
+
+```toml
+[[bindings]]
+agent_id = "team"
+channel = "slack"
+workspace_id = "T01234567"
+```
+
+This binding routes all messages from Slack workspace `T01234567` to the `team` agent.
+
+### Slack Channel-Specific Binding
+
+```toml
+[[bindings]]
+agent_id = "support"
+channel = "slack"
+workspace_id = "T01234567"
+channel_ids = ["C01234567"]
+```
+
+Only messages from channel `C01234567` are routed to the `support` agent.
+
+### Telegram Chat Binding
+
+```toml
+[[bindings]]
+agent_id = "group"
+channel = "telegram"
+chat_id = "-1001234567890"
+```
+
+Messages from Telegram chat `-1001234567890` are routed to the `group` agent.
+
+### Twitch Channel Binding
+
+```toml
+[[bindings]]
+agent_id = "stream"
+channel = "twitch"
+channel_ids = ["mystreamer"]
+```
+
+Messages from Twitch channel `mystreamer` are routed to the `stream` agent.
+
+### Multiple Agents, Multiple Platforms
+
+```toml
+# Support agent handles Discord support channel
+[[bindings]]
+agent_id = "support"
+channel = "discord"
+guild_id = "123456789012345678"
+channel_ids = ["987654321098765432"]
+
+# Community agent handles rest of Discord guild
+[[bindings]]
+agent_id = "community"
+channel = "discord"
+guild_id = "123456789012345678"
+
+# Team agent handles Slack workspace
+[[bindings]]
+agent_id = "team"
+channel = "slack"
+workspace_id = "T01234567"
+
+# Default agent handles everything else
+[[agents]]
+id = "default"
+default = true
+```
+
+### Named Adapter Instances
+
+```toml
+# Configure two Discord bot instances
+[messaging.discord]
+token = "env:DISCORD_TOKEN_MAIN"
+
+[[messaging.discord.instances]]
+name = "support_bot"
+token = "env:DISCORD_TOKEN_SUPPORT"
+
+# Main bot handles general guild
+[[bindings]]
+agent_id = "community"
+channel = "discord"
+guild_id = "111111111111111111"
+# No adapter specified = uses default token
+
+# Support bot handles support guild
+[[bindings]]
+agent_id = "support"
+channel = "discord"
+adapter = "support_bot"
+guild_id = "222222222222222222"
+```
