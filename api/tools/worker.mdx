@@ -360,3 +360,113 @@ Update your worker status to give the channel visibility into your progress. Sta
 <Note>
 Use `set_status` periodically during long-running tasks so the user knows you're making progress.
 </Note>
+
+---
+
+## read_skill
+
+Read the full content of an installed skill. Useful for accessing skill instructions, examples, and bundled resources.
+
+<ParamField path="skill_name" type="string" required>
+  Name of the skill to read
+</ParamField>
+
+<ResponseField name="content" type="string">
+  The full skill content with variables resolved
+</ResponseField>
+
+<ResponseField name="base_dir" type="string">
+  The skill's base directory path
+</ResponseField>
+
+### Example
+
+```json
+{
+  "skill_name": "github"
+}
+```
+
+---
+
+## web_search
+
+Search the web using Brave Search API. Returns relevant results with titles, URLs, and descriptions.
+
+<ParamField path="query" type="string" required>
+  The search query
+</ParamField>
+
+<ParamField path="count" type="number" default={5}>
+  Number of results to return (1-20)
+</ParamField>
+
+<ParamField path="freshness" type="string">
+  Time filter: `"day"`, `"week"`, `"month"`, `"year"`
+</ParamField>
+
+<ParamField path="country" type="string" default={"us"}>
+  Country code for localized results (e.g., "us", "uk", "de")
+</ParamField>
+
+<ResponseField name="results" type="array">
+  Array of search results with title, url, description, and published_time
+</ResponseField>
+
+<Note>
+  Requires `brave_search_key` configured in your agent's config. Get a free API key at https://brave.com/search/api/
+</Note>
+
+### Example
+
+```json
+{
+  "query": "Rust async programming patterns",
+  "count": 5,
+  "freshness": "month"
+}
+```
+
+---
+
+## email_search
+
+Search email messages via IMAP. Returns matching messages with headers and content.
+
+<ParamField path="query" type="string" required>
+  Search query (IMAP SEARCH syntax)
+</ParamField>
+
+<ParamField path="folder" type="string" default={"INBOX"}>
+  Email folder to search
+</ParamField>
+
+<ParamField path="max_results" type="number" default={10}>
+  Maximum number of results to return
+</ParamField>
+
+<ResponseField name="messages" type="array">
+  Array of email messages with subject, from, date, and body
+</ResponseField>
+
+<Note>
+  Requires email configuration (IMAP host, credentials) in messaging.email config section.
+</Note>
+
+### Example
+
+```json
+{
+  "query": "FROM support@example.com SINCE 1-Jan-2024",
+  "folder": "INBOX",
+  "max_results": 5
+}
+```
+
+---
+
+## Related Tools
+
+- [Channel Tools](/api/tools/channel) - reply, branch, spawn_worker, route, send_file
+- [Memory Tools](/api/tools/memory) - memory_save, memory_recall (branch only)
+- [System Tools](/api/tools/system) - task management, worker inspection

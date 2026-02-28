@@ -311,6 +311,116 @@ Add an emoji reaction to the message. Quick, non-verbal acknowledgment.
 
 ---
 
+## send_file
+
+Send a file attachment to the user. Reads a file from the agent's workspace and delivers it in the conversation.
+
+<ParamField path="file_path" type="string" required>
+  Path to the file to send, relative to the workspace directory
+</ParamField>
+
+<ParamField path="caption" type="string">
+  Optional caption or description for the file
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the file was sent successfully
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message
+</ResponseField>
+
+<Note>
+  File access is restricted to the agent's workspace boundary for security. Attempting to send files outside the workspace will fail.
+</Note>
+
+### Example
+
+```json
+{
+  "file_path": "reports/analysis.pdf",
+  "caption": "Here's the analysis report you requested"
+}
+```
+
+---
+
+## send_message_to_another_channel
+
+Send a message to a different platform channel. Useful for cross-platform notifications or multi-channel workflows.
+
+<ParamField path="adapter" type="string" required>
+  The messaging adapter name: `discord`, `slack`, `telegram`, `webhook`
+</ParamField>
+
+<ParamField path="channel_id" type="string" required>
+  The target channel identifier (Discord channel ID, Slack channel name, Telegram chat ID, webhook URL)
+</ParamField>
+
+<ParamField path="message" type="string" required>
+  The message content to send
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the message was sent successfully
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message
+</ResponseField>
+
+### Example
+
+```json
+{
+  "adapter": "discord",
+  "channel_id": "1234567890123456789",
+  "message": "Alert: New critical issue detected in production"
+}
+```
+
+---
+
+## send_agent_message
+
+Send a message to another agent through the agent communication graph. Currently validates that a link exists between agents.
+
+<ParamField path="agent_id" type="string" required>
+  Target agent ID or display name
+</ParamField>
+
+<ParamField path="message" type="string" required>
+  Message content to send to the target agent
+</ParamField>
+
+<ParamField path="link_id" type="string">
+  Specific link ID to use if multiple links exist to the same agent
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether the link was validated and message queued
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message
+</ResponseField>
+
+<Note>
+  This tool currently validates that the communication link exists in the agent graph. Full cross-agent task delegation will be implemented in a future release.
+</Note>
+
+### Example
+
+```json
+{
+  "agent_id": "research-assistant",
+  "message": "Please analyze the market trends for Q4"
+}
+```
+
+---
+
 ## cron
 
 Manage scheduled recurring tasks. Create, list, or delete cron jobs that run at specified intervals or on cron schedules.

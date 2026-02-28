@@ -294,3 +294,49 @@ The tool validates link existence and direction before accepting messages.
 <Note>
 **Future implementation**: This will create a task in the target agent's task store rather than sending a direct message. The task system is the intended mechanism for cross-agent delegation.
 </Note>
+
+---
+
+## worker_inspect
+
+Inspect the current state of a running worker process. Returns status, task description, and recent activity.
+
+<ParamField path="worker_id" type="string" required>
+  The UUID of the worker to inspect
+</ParamField>
+
+<ResponseField name="worker_id" type="string">
+  The worker's UUID
+</ResponseField>
+
+<ResponseField name="state" type="string">
+  Current worker state: `Running`, `WaitingForInput`, `Done`, or `Failed`
+</ResponseField>
+
+<ResponseField name="task" type="string">
+  The worker's assigned task description
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Most recent status update from the worker
+</ResponseField>
+
+<ResponseField name="started_at" type="string">
+  Timestamp when the worker was created
+</ResponseField>
+
+### Example
+
+```json
+{
+  "worker_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+---
+
+## Related Tools
+
+- [Channel Tools](/api/tools/channel) - Conversation and delegation tools
+- [Worker Tools](/api/tools/worker) - Task execution tools
+- [Memory Tools](/api/tools/memory) - Knowledge storage and retrieval
