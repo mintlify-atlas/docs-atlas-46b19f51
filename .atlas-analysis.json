@@ -1,0 +1,142 @@
+{
+  "projectType": "framework",
+  "projectName": "Spacebot",
+  "projectDescription": "An AI agent framework for teams and communities with specialized processes for concurrent thinking, working, and remembering.",
+  "theme": "aspen",
+  "primaryColor": "#5865F2",
+  "lightColor": "#7289DA",
+  "darkColor": "#4752C4",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "docker"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "core/architecture",
+              "core/channels",
+              "core/agents",
+              "core/memory",
+              "core/routing",
+              "core/compaction",
+              "core/cortex",
+              "core/prompts",
+              "core/philosophy"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/tools",
+              "features/workers",
+              "features/tasks",
+              "features/cron",
+              "features/skills",
+              "features/mcp",
+              "features/opencode",
+              "features/browser",
+              "features/ingestion"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/config",
+              "configuration/permissions"
+            ]
+          },
+          {
+            "group": "Messaging",
+            "pages": [
+              "messaging/overview",
+              "messaging/discord-setup",
+              "messaging/slack-setup",
+              "messaging/telegram-setup",
+              "messaging/twitch-setup",
+              "messaging/email-setup"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/metrics",
+              "deployment/roadmap"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "CLI Commands",
+            "pages": [
+              "api/cli/start",
+              "api/cli/stop",
+              "api/cli/status",
+              "api/cli/skill",
+              "api/cli/auth"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "api/config/llm",
+              "api/config/agents",
+              "api/config/routing",
+              "api/config/bindings",
+              "api/config/mcp"
+            ]
+          },
+          {
+            "group": "Tools",
+            "pages": [
+              "api/tools/channel",
+              "api/tools/branch",
+              "api/tools/worker",
+              "api/tools/memory",
+              "api/tools/system"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-agent orchestration with concurrent process delegation",
+    "Structured memory graph with hybrid vector and full-text search",
+    "Message coalescing for high-traffic channels",
+    "Model routing with automatic fallback chains",
+    "Skills and MCP integration for extensibility",
+    "Native messaging adapters for Discord, Slack, Telegram, Twitch",
+    "Process sandboxing and leak detection",
+    "Cron jobs with circuit breakers",
+    "OpenCode integration for deep coding sessions"
+  ],
+  "publicApiSurface": [
+    "spacebot start/stop/restart/status",
+    "spacebot skill add/list/remove/info",
+    "spacebot auth login/logout/status/refresh",
+    "Channel (conversational agent process)",
+    "Branch (thinking subprocess)",
+    "Worker (task execution process)",
+    "Cortex (system-level observer)",
+    "Memory (structured graph storage)",
+    "LlmManager (model routing)",
+    "ToolServer (extensible tool system)",
+    "MessagingAdapter (Discord, Slack, Telegram, Twitch, Email, Webhook)",
+    "Skills (plugin system)",
+    "MCP (Model Context Protocol integration)",
+    "Config (TOML configuration)",
+    "Cron (scheduled tasks)"
+  ]
+}
